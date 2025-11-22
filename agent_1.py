@@ -1,20 +1,42 @@
 from mcp.server.fastmcp import FastMCP
-import re
+import pypdf
+import docx
+import os
 
-mcp = FastMCP("compliance")
+mcp = FastMCP("ingestion")
+
 
 @mcp.tool()
-def redact_pii(text: str) -> str:
-    """Redact PII (emails, phone numbers) from text."""
-    # Redact emails
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    text = re.sub(email_pattern, "[REDACTED_EMAIL]", text)
-    
-    # Redact phone numbers (simple pattern)
-    phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
-    text = re.sub(phone_pattern, "[REDACTED_PHONE]", text)
-    
-    return text
+def read_pdf(file_path: str) -> str:
+    """Extract text from a PDF file."""
+    if not os.path.exists(file_path):
+        return f"Error: File not found at {file_path}"
+
+    try:
+        reader = pypdf.PdfReader(file_path)
+        text = ""
+        for page in reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted + "\n"
+        return text.strip()
+    except Exception as e:
+        return f"Error reading PDF: {str(e)}"
+
+
+@mcp.tool()
+def read_docx(file_path: str) -> str:
+    """Extract text from a DOCX file."""
+    if not os.path.exists(file_path):
+        return f"Error: File not found at {file_path}"
+
+    try:
+        doc = docx.Document(file_path)
+        text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+        return text.strip()
+    except Exception as e:
+        return f"Error reading DOCX: {str(e)}"
+
 
 if __name__ == "__main__":
     mcp.run()
