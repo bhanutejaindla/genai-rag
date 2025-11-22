@@ -1,46 +1,85 @@
 from sqlalchemy import (
-    Column, Integer, String, DateTime, JSON, Boolean, Enum
+    Column, Integer, String, DateTime, JSON, Enum, ForeignKey
 )
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from database.db import Base
 import enum
 
 
 # -----------------------------
-# Tool Status Enum
+# Report Status Enum
 # -----------------------------
-class ToolStatus(enum.Enum):
-    active = "active"
-    inactive = "inactive"
-    deprecated = "deprecated"
+class ReportStatus(enum.Enum):
+    pending = "pending"
+    generating = "generating"
+    completed = "completed"
+    failed = "failed"
 
 
 # -----------------------------
-# Tool Model
+# Report Model
 # -----------------------------
-class Tool(Base):
-    __tablename__ = "tools"
+class Report(Base):
+    __tablename__ = "reports"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
 
-    name = Column(String, nullable=False, unique=True)
-    description = Column(String, nullable=True)
+    # Title shown in UI
+    title = Column(String, nullable=False)
 
-    # Tool lifecycle status (active/inactive/deprecated)
-    status = Column(Enum(ToolStatus), default=ToolStatus.active, nullable=False)
+    # Type of Report: summary, analysis, insights, compliance, etc.
+    type = Column(String, nullable=False)
 
-    # JSON config for flexible tool parameters
-    config = Column(JSON, nullable=True)
+    # pending / generating / completed / failed
+    status = Column(Enum(ReportStatus),
+                    default=ReportStatus.pending,
+                    nullable=False)
 
-    # Soft delete flag
-    is_deleted = Column(Boolean, default=False)
+    # Final report content (structured JSON)
+    content = Column(JSON, nullable=True)
 
-    # Additional optional data
+    """
+    Example content:
+    {
+        "executive_summary": "...",
+        "findings": [...],
+        "risks": [...],
+        "citations": [
+            {"source": "web", "url": "..."},
+            {"source": "document", "page": 14}
+        ]
+    }
+    """
+
+    # If report exported to PDF/DOCX — store file path
+    file_url = Column(String, nullable=True)
+
+    # Version tracking (important for editing & audit)
+    version = Column(Integer, default=1)
+
+    # Who requested this report
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    user = relationship("User")
+
+    # Link back to job that generated this report
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    job = relationship("Job")
+
+    # Extra JSON metadata (optional)
     metadata = Column(JSON, nullable=True)
 
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    """
+    Example metadata:
+    {
+        "topic": "RFP Analysis",
+        "documents_used": [1, 2, 3],
+        "duration_sec": 33,
+        "agent_version": "v1.3"
+    }
+    """
 
-    # Back reference to Agents using this tool
-    agents = relationship("Agent", secondary="agent_tools", back_populates="tools")
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    generated_at = Column(DateTime, nullable=True)
