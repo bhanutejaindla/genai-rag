@@ -1,62 +1,60 @@
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pydantic import BaseModel
+import shutil
 import os
-from langchain_postgres import PGVector
-from langchain_openai import OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from dotenv import load_dotenv
+import asyncio
+from .rag import add_document
+# Direct imports from MCP servers
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from mcp_servers.ingestion.server import read_pdf, read_docx
 
-load_dotenv()
+app = FastAPI(title="Research Agent Platform API")
 
-# Postgres DSN
-CONNECTION_STRING = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
-)
+class ChatRequest(BaseModel):
+    message: str
 
-COLLECTION_NAME = "research_docs"
+@app.get("/")
+async def root():
+    return {"message": "Research Agent Platform API is running"}
 
-# Initialize Embeddings
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    try:
+        # Use Linear Agent Pipeline with direct calls
+        from .agent import run_agent
+        response = await run_agent(request.message)
+        return {"response": response}
+    except Exception as e:
+        # Fallback if LLM/Agent fails
+        return {"response": f"Agent Error: {str(e)}. (Ensure OpenAI Key is set for this demo)"}
 
-# Initialize Vector Store
-vector_store = PGVector(
-    embeddings=embeddings,
-    collection_name=COLLECTION_NAME,
-    connection=CONNECTION_STRING,
-    use_jsonb=True,
-)
-
-def add_document(text: str, source: str):
-    """
-    Chunks and adds a document to PGVector.
-    """
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        separators=["\n\n", "\n", " ", ""]
-    )
-
-    chunks = splitter.split_text(text)
-
-    if not chunks:
-        return 0
-
-    metadatas = [{"source": source} for _ in chunks]
-
-    vector_store.add_texts(texts=chunks, metadatas=metadatas)
-
-    return len(chunks)
-
-def query_documents(query: str, n_results: int = 5):
-    """
-    Queries PGVector for relevant context.
-    """
-    results = vector_store.similarity_search(query, k=n_results)
-
-    context = ""
-    for doc in results:
-        source = doc.metadata.get("source", "Unknown")
-        context += f"[Source: {source}]\n{doc.page_content}\n\n"
-
-    return context
-
-
+@app.post("/ingest")
+async def ingest_document(file: UploadFile = File(...)):
+    upload_dir = "uploads"
+    file_location = os.path.join(upload_dir, file.filename)
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    with open(file_location, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    # Trigger ingestion tool directly
+    try:
+        text_content = ""
+        if file.filename.endswith(".pdf"):
+            text_content = await asyncio.to_thread(read_pdf, os.path.abspath(file_location))
+        elif file.filename.endswith(".docx"):
+            text_content = await asyncio.to_thread(read_docx, os.path.abspath(file_location))
+        else:
+            return {"message": "File saved, but type not supported for extraction.", "path": file_location}
+            
+        # Index in Vector DB
+        num_chunks = await asyncio.to_thread(add_document, text_content, source=file.filename)
+            
+        return {
+            "message": "File ingested and indexed successfully", 
+            "chunks_added": num_chunks,
+            "content_preview": text_content[:200]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
