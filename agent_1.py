@@ -1,24 +1,20 @@
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # path to /root
+from mcp.client.stdio import stdio_client
+from mcp import ClientSession, StdioServerParameters
+import asyncio
 
-    await mcp_client.connect_to_server(
-        "ingestion",
-        "python3",
-        [os.path.join(BASE_DIR, "mcp_servers", "ingestion", "server.py")]
+async def test():
+    server_params = StdioServerParameters(
+        command="python3",
+        args=["/home/user/project/mcp_servers/ingestion/server.py"]  # your ingestion server
     )
+    stdio, write = await stdio_client(server_params).__aenter__()
+    session = await ClientSession(stdio, write).__aenter__()
 
-    await mcp_client.connect_to_server(
-        "research",
-        "python3",
-        [os.path.join(BASE_DIR, "mcp_servers", "research", "server.py")]
+    # Call tool
+    result = await session.call_tool(
+        "read_pdf",
+        {"file_path": "/home/user/project/uploads/sample.pdf"}  # your PDF
     )
+    print(result.content[0].text)
 
-    await mcp_client.connect_to_server(
-        "compliance",
-        "python3",
-        [os.path.join(BASE_DIR, "mcp_servers", "compliance", "server.py")]
-    )
-
-    yield
-    await mcp_client.cleanup()
+asyncio.run(test())
