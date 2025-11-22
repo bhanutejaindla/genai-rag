@@ -1,85 +1,46 @@
 from sqlalchemy import (
-    Column, Integer, String, DateTime, JSON, Enum, ForeignKey
+    Column, Integer, String, DateTime, JSON, ForeignKey
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from database.db import Base
-import enum
 
 
-# -----------------------------
-# Report Status Enum
-# -----------------------------
-class ReportStatus(enum.Enum):
-    pending = "pending"
-    generating = "generating"
-    completed = "completed"
-    failed = "failed"
-
-
-# -----------------------------
-# Report Model
-# -----------------------------
-class Report(Base):
-    __tablename__ = "reports"
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True)
 
-    # Title shown in UI
-    title = Column(String, nullable=False)
-
-    # Type of Report: summary, analysis, insights, compliance, etc.
-    type = Column(String, nullable=False)
-
-    # pending / generating / completed / failed
-    status = Column(Enum(ReportStatus),
-                    default=ReportStatus.pending,
-                    nullable=False)
-
-    # Final report content (structured JSON)
-    content = Column(JSON, nullable=True)
-
-    """
-    Example content:
-    {
-        "executive_summary": "...",
-        "findings": [...],
-        "risks": [...],
-        "citations": [
-            {"source": "web", "url": "..."},
-            {"source": "document", "page": 14}
-        ]
-    }
-    """
-
-    # If report exported to PDF/DOCX — store file path
-    file_url = Column(String, nullable=True)
-
-    # Version tracking (important for editing & audit)
-    version = Column(Integer, default=1)
-
-    # Who requested this report
-    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    # Who performed the action (nullable for system events)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     user = relationship("User")
 
-    # Link back to job that generated this report
-    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
-    job = relationship("Job")
+    # What entity was affected (report, job, tool, agent, user, file)
+    entity = Column(String, nullable=False)
 
-    # Extra JSON metadata (optional)
+    # Entity ID — e.g. job_id, report_id
+    entity_id = Column(Integer, nullable=True)
+
+    # Action performed
+    action = Column(String, nullable=False)
+    """
+    Examples:
+    - "create"
+    - "update"
+    - "delete"
+    - "status_change"
+    - "tool_execute"
+    - "report_generated"
+    - "pdf_export"
+    - "login"
+    """
+
+    # Optional: new/old values
+    before = Column(JSON, nullable=True)
+    after = Column(JSON, nullable=True)
+
+    # Additional context (IP, errors, tool used, etc.)
     metadata = Column(JSON, nullable=True)
 
-    """
-    Example metadata:
-    {
-        "topic": "RFP Analysis",
-        "documents_used": [1, 2, 3],
-        "duration_sec": 33,
-        "agent_version": "v1.3"
-    }
-    """
-
-    # Timestamps
+    # Timestamp of log entry
     created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    generated_at = Column(DateTime, nullable=True)
