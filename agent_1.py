@@ -58,3 +58,5 @@ def query_documents(query: str, n_results: int = 5):
         context += f"[Source: {source}]\n{doc.page_content}\n\n"
 
     return context
+
+
