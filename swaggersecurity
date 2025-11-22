@@ -1,35 +1,46 @@
-from fastapi import FastAPI
-from fastapi.openapi.utils import get_openapi
-
-app = FastAPI()
-
-
-def custom_openapi():
-    if app.openapi_schema:
-        return app.openapi_schema
-
-    openapi_schema = get_openapi(
-        title="Your API",
-        version="1.0.0",
-        routes=app.routes,
-    )
-
-    # Add custom security scheme here
-    openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
-            "type": "apiKey",
-            "in": "header",
-            "name": "Authorization"
-        }
-    }
-
-    # Apply security globally (every endpoint)
-    openapi_schema["security"] = [
-        {"BearerAuth": []}
-    ]
-
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
+from sqlalchemy import (
+    Column, Integer, String, DateTime, JSON, Boolean, Enum
+)
+from sqlalchemy.sql import func
+from database.db import Base
+import enum
 
 
-app.openapi = custom_openapi
+# -----------------------------
+# Tool Status Enum
+# -----------------------------
+class ToolStatus(enum.Enum):
+    active = "active"
+    inactive = "inactive"
+    deprecated = "deprecated"
+
+
+# -----------------------------
+# Tool Model
+# -----------------------------
+class Tool(Base):
+    __tablename__ = "tools"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    name = Column(String, nullable=False, unique=True)
+    description = Column(String, nullable=True)
+
+    # Tool lifecycle status (active/inactive/deprecated)
+    status = Column(Enum(ToolStatus), default=ToolStatus.active, nullable=False)
+
+    # JSON config for flexible tool parameters
+    config = Column(JSON, nullable=True)
+
+    # Soft delete flag
+    is_deleted = Column(Boolean, default=False)
+
+    # Additional optional data
+    metadata = Column(JSON, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Back reference to Agents using this tool
+    agents = relationship("Agent", secondary="agent_tools", back_populates="tools")
