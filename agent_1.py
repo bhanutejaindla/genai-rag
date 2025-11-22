@@ -1,42 +1,113 @@
-from mcp.server.fastmcp import FastMCP
-import pypdf
-import docx
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 import os
+from dotenv import load_dotenv
+from .rag import query_documents
+from .mcp_client import MCPClient
 
-mcp = FastMCP("ingestion")
+load_dotenv()
 
+# Initialize LLM
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-@mcp.tool()
-def read_pdf(file_path: str) -> str:
-    """Extract text from a PDF file."""
-    if not os.path.exists(file_path):
-        return f"Error: File not found at {file_path}"
-
+async def run_agent(query: str, mcp_client: MCPClient):
+    """
+    Linear Agent Pipeline:
+    1. Retrieve Context (RAG)
+    2. Web Research (MCP)
+    3. Synthesize Answer (LLM)
+    4. Verify Answer (LLM)
+    5. Refine Answer (LLM)
+    6. Compliance Check (MCP)
+    """
+    print(f"--- Starting Agent for Query: {query} ---")
+    
+    # 1. Retrieve Context
+    print("1. Retrieving Context...")
+    context = query_documents(query)
+    
+    # 2. Web Research
+    print("2. Performing Web Research...")
+    web_results = ""
     try:
-        reader = pypdf.PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-        return text.strip()
+        if "research" in mcp_client.sessions:
+            result = await mcp_client.call_tool("research", "web_search", {"query": query})
+            if result and result.content:
+                web_results = result.content[0].text
+        else:
+            web_results = "Web search unavailable (client not connected)"
     except Exception as e:
-        return f"Error reading PDF: {str(e)}"
+        web_results = f"Search failed: {e}"
 
-
-@mcp.tool()
-def read_docx(file_path: str) -> str:
-    """Extract text from a DOCX file."""
-    if not os.path.exists(file_path):
-        return f"Error: File not found at {file_path}"
-
+    # 3. Synthesize Answer
+    print("3. Synthesizing Answer...")
+    synthesis_prompt = ChatPromptTemplate.from_template(
+        """You are a research analyst. Answer the query based on the provided context and web results.
+        
+        Query: {query}
+        
+        Internal Documents (Context):
+        {context}
+        
+        Web Search Results:
+        {web_results}
+        
+        Answer:"""
+    )
+    chain = synthesis_prompt | llm
+    draft_answer = chain.invoke({
+        "query": query,
+        "context": context,
+        "web_results": web_results
+    }).content
+    
+    # 4. Verify Answer
+    print("4. Verifying Answer...")
+    verification_prompt = ChatPromptTemplate.from_template(
+        """Verify the following answer for accuracy and proper citation usage based on the sources.
+        
+        Answer: {draft_answer}
+        
+        Sources:
+        {context}
+        {web_results}
+        
+        Critique (List any missing citations or hallucinations, or say 'LGTM'):"""
+    )
+    chain = verification_prompt | llm
+    critique = chain.invoke({
+        "draft_answer": draft_answer,
+        "context": context,
+        "web_results": web_results
+    }).content
+    
+    # 5. Refine Answer
+    print("5. Refining Answer...")
+    final_answer = draft_answer
+    if "LGTM" not in critique:
+        refine_prompt = ChatPromptTemplate.from_template(
+            """Refine the answer based on the critique.
+            
+            Original Answer: {draft_answer}
+            Critique: {critique}
+            
+            Refined Answer:"""
+        )
+        chain = refine_prompt | llm
+        final_answer = chain.invoke({
+            "draft_answer": draft_answer,
+            "critique": critique
+        }).content
+        
+    # 6. Compliance Check
+    print("6. Checking Compliance...")
     try:
-        doc = docx.Document(file_path)
-        text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
-        return text.strip()
+        if "compliance" in mcp_client.sessions:
+            result = await mcp_client.call_tool("compliance", "redact_pii", {"text": final_answer})
+            if result and result.content:
+                final_answer = result.content[0].text
     except Exception as e:
-        return f"Error reading DOCX: {str(e)}"
-
-
-if __name__ == "__main__":
-    mcp.run()
+        print(f"Compliance check failed: {e}")
+        
+    print("--- Agent Finished ---")
+    return final_answer
