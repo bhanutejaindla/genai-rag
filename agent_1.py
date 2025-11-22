@@ -1,83 +1,113 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel
-import shutil
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 import os
-from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+from .rag import query_documents
 from .mcp_client import MCPClient
-from .rag import add_document
 
-# Global MCP Client
-mcp_client = MCPClient()
+load_dotenv()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Connect to MCP servers
-    cwd = os.getcwd()
-    await mcp_client.connect_to_server(
-        "ingestion", 
-        "python3", 
-        [f"{cwd}/mcp_servers/ingestion/server.py"]
-    )
-    await mcp_client.connect_to_server(
-        "research", 
-        "python3", 
-        [f"{cwd}/mcp_servers/research/server.py"]
-    )
-    await mcp_client.connect_to_server(
-        "compliance", 
-        "python3", 
-        [f"{cwd}/mcp_servers/compliance/server.py"]
-    )
-    yield
-    await mcp_client.cleanup()
+# Initialize LLM
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-app = FastAPI(title="Research Agent Platform API", lifespan=lifespan)
-
-class ChatRequest(BaseModel):
-    message: str
-
-@app.get("/")
-async def root():
-    return {"message": "Research Agent Platform API is running"}
-
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    try:
-        # Use Linear Agent Pipeline
-        from .agent import run_agent
-        response = await run_agent(request.message, mcp_client)
-        return {"response": response}
-    except Exception as e:
-        # Fallback if LLM/Agent fails
-        return {"response": f"Agent Error: {str(e)}. (Ensure OpenAI Key is set for this demo)"}
-
-@app.post("/ingest")
-async def ingest_document(file: UploadFile = File(...)):
-    file_location = f"uploads/{file.filename}"
-    os.makedirs("uploads", exist_ok=True)
+async def run_agent(query: str, mcp_client: MCPClient):
+    """
+    Linear Agent Pipeline:
+    1. Retrieve Context (RAG)
+    2. Web Research (MCP)
+    3. Synthesize Answer (LLM)
+    4. Verify Answer (LLM)
+    5. Refine Answer (LLM)
+    6. Compliance Check (MCP)
+    """
+    print(f"--- Starting Agent for Query: {query} ---")
     
-    with open(file_location, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    # Trigger ingestion tool
+    # 1. Retrieve Context
+    print("1. Retrieving Context...")
+    context = query_documents(query)
+    
+    # 2. Web Research
+    print("2. Performing Web Research...")
+    web_results = ""
     try:
-        text_content = ""
-        if file.filename.endswith(".pdf"):
-            result = await mcp_client.call_tool("ingestion", "read_pdf", {"file_path": os.path.abspath(file_location)})
-            text_content = result.content[0].text
-        elif file.filename.endswith(".docx"):
-            result = await mcp_client.call_tool("ingestion", "read_docx", {"file_path": os.path.abspath(file_location)})
-            text_content = result.content[0].text
+        if "research" in mcp_client.sessions:
+            result = await mcp_client.call_tool("research", "web_search", {"query": query})
+            if result and result.content:
+                web_results = result.content[0].text
         else:
-            return {"message": "File saved, but type not supported for extraction.", "path": file_location}
-            
-        # Index in Vector DB
-        num_chunks = add_document(text_content, source=file.filename)
-            
-        return {
-            "message": "File ingested and indexed successfully", 
-            "chunks_added": num_chunks,
-            "content_preview": text_content[:200]
-        }
+            web_results = "Web search unavailable (client not connected)"
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        web_results = f"Search failed: {e}"
+
+    # 3. Synthesize Answer
+    print("3. Synthesizing Answer...")
+    synthesis_prompt = ChatPromptTemplate.from_template(
+        """You are a research analyst. Answer the query based on the provided context and web results.
+        
+        Query: {query}
+        
+        Internal Documents (Context):
+        {context}
+        
+        Web Search Results:
+        {web_results}
+        
+        Answer:"""
+    )
+    chain = synthesis_prompt | llm
+    draft_answer = chain.invoke({
+        "query": query,
+        "context": context,
+        "web_results": web_results
+    }).content
+    
+    # 4. Verify Answer
+    print("4. Verifying Answer...")
+    verification_prompt = ChatPromptTemplate.from_template(
+        """Verify the following answer for accuracy and proper citation usage based on the sources.
+        
+        Answer: {draft_answer}
+        
+        Sources:
+        {context}
+        {web_results}
+        
+        Critique (List any missing citations or hallucinations, or say 'LGTM'):"""
+    )
+    chain = verification_prompt | llm
+    critique = chain.invoke({
+        "draft_answer": draft_answer,
+        "context": context,
+        "web_results": web_results
+    }).content
+    
+    # 5. Refine Answer
+    print("5. Refining Answer...")
+    final_answer = draft_answer
+    if "LGTM" not in critique:
+        refine_prompt = ChatPromptTemplate.from_template(
+            """Refine the answer based on the critique.
+            
+            Original Answer: {draft_answer}
+            Critique: {critique}
+            
+            Refined Answer:"""
+        )
+        chain = refine_prompt | llm
+        final_answer = chain.invoke({
+            "draft_answer": draft_answer,
+            "critique": critique
+        }).content
+        
+    # 6. Compliance Check
+    print("6. Checking Compliance...")
+    try:
+        if "compliance" in mcp_client.sessions:
+            result = await mcp_client.call_tool("compliance", "redact_pii", {"text": final_answer})
+            if result and result.content:
+                final_answer = result.content[0].text
+    except Exception as e:
+        print(f"Compliance check failed: {e}")
+        
+    print("--- Agent Finished ---")
+    return final_answer
