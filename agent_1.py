@@ -1,90 +1,20 @@
-from vectordb import InMemoryExactNNVectorDB
-from docarray import BaseDoc, DocList
-from docarray.typing import NdArray
-import os
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from dotenv import load_dotenv
-import openai
-import numpy as np
+from mcp.server.fastmcp import FastMCP
+import re
 
-load_dotenv()
+mcp = FastMCP("compliance")
 
-# Define Document Schema
-class ResearchDoc(BaseDoc):
-    text: str
-    source: str
-    embedding: NdArray[1536]  # OpenAI embedding size
+@mcp.tool()
+def redact_pii(text: str) -> str:
+    """Redact PII (emails, phone numbers) from text."""
+    # Redact emails
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    text = re.sub(email_pattern, "[REDACTED_EMAIL]", text)
+    
+    # Redact phone numbers (simple pattern)
+    phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
+    text = re.sub(phone_pattern, "[REDACTED_PHONE]", text)
+    
+    return text
 
-
-# Initialize VectorDB
-db = InMemoryExactNNVectorDB[ResearchDoc](
-    workspace="./vectordb_workspace"
-)
-
-# OpenAI Client
-openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-def get_embedding(text: str):
-    response = openai_client.embeddings.create(
-        input=text,
-        model="text-embedding-3-small"
-    )
-    return response.data[0].embedding
-
-def add_document(text: str, source: str):
-    """
-    Chunks and adds a document to the vector DB.
-    """
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len,
-        separators=["\n\n", "\n", " ", ""]
-    )
-    chunks = text_splitter.split_text(text)
-
-    if not chunks:
-        return 0
-
-    docs = DocList[ResearchDoc]()
-
-    for chunk in chunks:
-        embedding = get_embedding(chunk)
-        docs.append(
-            ResearchDoc(
-                text=chunk,
-                source=source,
-                embedding=np.array(embedding, dtype=np.float32)
-            )
-        )
-
-    db.index(docs)
-    return len(chunks)
-
-
-def query_documents(query: str, n_results: int = 5):
-    """
-    Searches vectordb using a query doc with an embedding.
-    """
-    query_embedding = get_embedding(query)
-
-    query_doc = ResearchDoc(
-        text=query,
-        source="user_query",
-        embedding=np.array(query_embedding, dtype=np.float32)
-    )
-
-    # Correct search call
-    results = db.search(
-        query=query_doc,
-        limit=n_results
-    )
-
-    context = ""
-
-    # results[0] contains matches for the query doc
-    if len(results) > 0:
-        for m in results[0].matches:
-            context += f"[Source: {m.source}]\n{m.text}\n\n"
-
-    return context
+if __name__ == "__main__":
+    mcp.run()
