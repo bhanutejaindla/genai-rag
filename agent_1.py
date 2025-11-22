@@ -17,3 +17,28 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 if __name__ == "__main__":
     mcp.run()
+
+
+fastapi
+uvicorn
+python-multipart
+
+mcp
+mcp-server
+mcp-client
+fastmcp
+
+pypdf
+python-docx
+
+duckduckgo-search
+
+vectordb
+docarray
+langchain-text-splitters
+numpy
+
+openai
+python-dotenv
+anyio
+
