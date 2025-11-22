@@ -1,60 +1,105 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel
-import shutil
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 import os
+from dotenv import load_dotenv
+from .rag import query_documents
 import asyncio
-from .rag import add_document
-# Direct imports from MCP servers
+
+# Direct imports from MCP server files (Python functions)
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from mcp_servers.ingestion.server import read_pdf, read_docx
+from mcp_servers.research.server import web_search
+from mcp_servers.compliance.server import redact_pii
+from mcp_servers.citation_validation.server import validate_citation
 
-app = FastAPI(title="Research Agent Platform API")
+load_dotenv()
 
-class ChatRequest(BaseModel):
-    message: str
+# Initialize LLM
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-@app.get("/")
-async def root():
-    return {"message": "Research Agent Platform API is running"}
-
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    try:
-        # Use Linear Agent Pipeline with direct calls
-        from .agent import run_agent
-        response = await run_agent(request.message)
-        return {"response": response}
-    except Exception as e:
-        # Fallback if LLM/Agent fails
-        return {"response": f"Agent Error: {str(e)}. (Ensure OpenAI Key is set for this demo)"}
-
-@app.post("/ingest")
-async def ingest_document(file: UploadFile = File(...)):
-    upload_dir = "uploads"
-    file_location = os.path.join(upload_dir, file.filename)
-    os.makedirs(upload_dir, exist_ok=True)
+async def run_agent(query: str):
+    """
+    Linear Agent Pipeline:
+    1. Retrieve Context (RAG)
+    2. Web Research (Direct Call)
+    3. Synthesize Answer (LLM)
+    4. Verify Answer (LLM)
+    5. Refine Answer (LLM)
+    6. Compliance Check (Direct Call)
+    """
+    print(f"--- Starting Agent for Query: {query} ---")
     
-    with open(file_location, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    # Trigger ingestion tool directly
+    # 1. Retrieve Context
+    print("1. Retrieving Context...")
+    # Run blocking RAG query in a separate thread
+    context = await asyncio.to_thread(query_documents, query)
+    
+    # 2. Web Research
+    print("2. Performing Web Research...")
+    web_results = ""
     try:
-        text_content = ""
-        if file.filename.endswith(".pdf"):
-            text_content = await asyncio.to_thread(read_pdf, os.path.abspath(file_location))
-        elif file.filename.endswith(".docx"):
-            text_content = await asyncio.to_thread(read_docx, os.path.abspath(file_location))
-        else:
-            return {"message": "File saved, but type not supported for extraction.", "path": file_location}
-            
-        # Index in Vector DB
-        num_chunks = await asyncio.to_thread(add_document, text_content, source=file.filename)
-            
-        return {
-            "message": "File ingested and indexed successfully", 
-            "chunks_added": num_chunks,
-            "content_preview": text_content[:200]
-        }
+        # Run blocking web search in a separate thread
+        web_results = await asyncio.to_thread(web_search, query)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        web_results = f"Search failed: {e}"
+
+    # 3. Synthesize Answer
+    print("3. Synthesizing Answer...")
+    synthesis_prompt = ChatPromptTemplate.from_template(
+        """You are a research analyst. Answer the query based on the provided context and web results.
+        
+        Query: {query}
+        
+        Internal Documents (Context):
+        {context}
+        
+        Web Search Results:
+        {web_results}
+        
+        Answer:"""
+    )
+    chain = synthesis_prompt | llm
+    draft_answer = await chain.ainvoke({
+        "query": query,
+        "context": context,
+        "web_results": web_results
+    })
+    draft_answer = draft_answer.content
+    
+    # 4. Verify Answer
+    print("4. Verifying Answer...")
+    try:
+        critique = await validate_citation(draft_answer, context, web_results)
+    except Exception as e:
+        print(f"Verification failed: {e}")
+        critique = f"Verification failed: {e}"
+    
+    # 5. Refine Answer
+    print("5. Refining Answer...")
+    final_answer = draft_answer
+    if "LGTM" not in critique:
+        refine_prompt = ChatPromptTemplate.from_template(
+            """Refine the answer based on the critique.
+            
+            Original Answer: {draft_answer}
+            Critique: {critique}
+            
+            Refined Answer:"""
+        )
+        chain = refine_prompt | llm
+        refined_response = await chain.ainvoke({
+            "draft_answer": draft_answer,
+            "critique": critique
+        })
+        final_answer = refined_response.content
+        
+    # 6. Compliance Check
+    print("6. Checking Compliance...")
+    try:
+        # Run blocking compliance check in a separate thread
+        final_answer = await asyncio.to_thread(redact_pii, final_answer)
+    except Exception as e:
+        print(f"Compliance check failed: {e}")
+        
+    print("--- Agent Finished ---")
+    return final_answer
