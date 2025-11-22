@@ -1,113 +1,100 @@
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT,
+    embedding VECTOR(1536)  -- or 3072 depending on model
+);
+
 import os
+import psycopg2
+from pgvector.psycopg2 import register_vector
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from openai import OpenAI
 from dotenv import load_dotenv
-from .rag import query_documents
-from .mcp_client import MCPClient
+import numpy as np
 
 load_dotenv()
 
-# Initialize LLM
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+# OpenAI Client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-async def run_agent(query: str, mcp_client: MCPClient):
-    """
-    Linear Agent Pipeline:
-    1. Retrieve Context (RAG)
-    2. Web Research (MCP)
-    3. Synthesize Answer (LLM)
-    4. Verify Answer (LLM)
-    5. Refine Answer (LLM)
-    6. Compliance Check (MCP)
-    """
-    print(f"--- Starting Agent for Query: {query} ---")
-    
-    # 1. Retrieve Context
-    print("1. Retrieving Context...")
-    context = query_documents(query)
-    
-    # 2. Web Research
-    print("2. Performing Web Research...")
-    web_results = ""
-    try:
-        if "research" in mcp_client.sessions:
-            result = await mcp_client.call_tool("research", "web_search", {"query": query})
-            if result and result.content:
-                web_results = result.content[0].text
-        else:
-            web_results = "Web search unavailable (client not connected)"
-    except Exception as e:
-        web_results = f"Search failed: {e}"
+# PostgreSQL Connection
+DB_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:password@localhost:5432/mydb"
+)
 
-    # 3. Synthesize Answer
-    print("3. Synthesizing Answer...")
-    synthesis_prompt = ChatPromptTemplate.from_template(
-        """You are a research analyst. Answer the query based on the provided context and web results.
-        
-        Query: {query}
-        
-        Internal Documents (Context):
-        {context}
-        
-        Web Search Results:
-        {web_results}
-        
-        Answer:"""
+conn = psycopg2.connect(DB_URL)
+register_vector(conn)
+cur = conn.cursor()
+
+# Create table if not exists
+cur.execute("""
+CREATE TABLE IF NOT EXISTS documents (
+    id SERIAL PRIMARY KEY,
+    source TEXT,
+    chunk TEXT,
+    embedding VECTOR(1536)
+);
+""")
+conn.commit()
+
+
+# ------------------------
+# EMBEDDING FUNCTION
+# ------------------------
+def get_embedding(text: str):
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
     )
-    chain = synthesis_prompt | llm
-    draft_answer = chain.invoke({
-        "query": query,
-        "context": context,
-        "web_results": web_results
-    }).content
-    
-    # 4. Verify Answer
-    print("4. Verifying Answer...")
-    verification_prompt = ChatPromptTemplate.from_template(
-        """Verify the following answer for accuracy and proper citation usage based on the sources.
-        
-        Answer: {draft_answer}
-        
-        Sources:
-        {context}
-        {web_results}
-        
-        Critique (List any missing citations or hallucinations, or say 'LGTM'):"""
+    return response.data[0].embedding
+
+
+# ------------------------
+# ADD DOCUMENT (Same style as old)
+# ------------------------
+def add_document(text: str, source: str):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""]
     )
-    chain = verification_prompt | llm
-    critique = chain.invoke({
-        "draft_answer": draft_answer,
-        "context": context,
-        "web_results": web_results
-    }).content
-    
-    # 5. Refine Answer
-    print("5. Refining Answer...")
-    final_answer = draft_answer
-    if "LGTM" not in critique:
-        refine_prompt = ChatPromptTemplate.from_template(
-            """Refine the answer based on the critique.
-            
-            Original Answer: {draft_answer}
-            Critique: {critique}
-            
-            Refined Answer:"""
-        )
-        chain = refine_prompt | llm
-        final_answer = chain.invoke({
-            "draft_answer": draft_answer,
-            "critique": critique
-        }).content
-        
-    # 6. Compliance Check
-    print("6. Checking Compliance...")
-    try:
-        if "compliance" in mcp_client.sessions:
-            result = await mcp_client.call_tool("compliance", "redact_pii", {"text": final_answer})
-            if result and result.content:
-                final_answer = result.content[0].text
-    except Exception as e:
-        print(f"Compliance check failed: {e}")
-        
-    print("--- Agent Finished ---")
-    return final_answer
+    chunks = text_splitter.split_text(text)
+
+    if not chunks:
+        return 0
+
+    for chunk in chunks:
+        embedding = get_embedding(chunk)
+
+        cur.execute("""
+            INSERT INTO documents (source, chunk, embedding)
+            VALUES (%s, %s, %s)
+        """, (source, chunk, embedding))
+
+    conn.commit()
+    return len(chunks)
+
+
+# ------------------------
+# QUERY DOCUMENTS (Same return as old code)
+# ------------------------
+def query_documents(query: str, n_results: int = 5):
+    query_emb = get_embedding(query)
+
+    cur.execute("""
+        SELECT source, chunk, (embedding <-> %s) AS distance
+        FROM documents
+        ORDER BY distance ASC
+        LIMIT %s
+    """, (query_emb, n_results))
+
+    rows = cur.fetchall()
+
+    context = ""
+
+    for src, chunk, dist in rows:
+        context += f"[Source: {src}]\n{chunk}\n\n"
+
+    return context
