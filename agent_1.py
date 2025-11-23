@@ -1,95 +1,64 @@
-@app.post("/ingest")
 async def ingest_document(
-    file: UploadFile = File(...), 
-    current_user: User = Depends(get_current_user),
-    session: Session = Depends(get_session)
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
 ):
-    """
-    Ingest a document:
-    1. Save file
-    2. Extract text (PDF/DOCX)
-    3. Split into chunks & store in PGVector
-    4. Track job steps + progress
-    """
-
-    # 1️⃣ Create an ingestion job
+    # --- 1. Create Job ---
     job = Job(
-        name=f"Document Ingestion – {file.filename}",
+        name=f"Ingest {file.filename}",
         type="ingestion",
         status=JobStatus.running,
-        user_id=current_user.id,
+        user_id=1,          # TEMP — change after adding auth
         progress=0.0,
-        tasks=[{"step": "upload_received", "status": "completed"}]
+        tasks=[]
     )
-    session.add(job)
-    session.commit()
-    session.refresh(job)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
 
+    # --- 2. Save uploaded file ---
     upload_dir = "uploads"
-    file_location = os.path.join(upload_dir, file.filename)
     os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, file.filename)
 
     try:
-        # 2️⃣ Save uploaded file
-        with open(file_location, "wb") as buffer:
+        with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        job.progress = 0.20
-        job.tasks.append({"step": "file_saved", "status": "completed", "path": file_location})
-        session.add(job)
-        session.commit()
+        job.tasks.append({"step": "file_saved", "path": file_path})
+        job.progress = 0.2
+        db.commit()
 
-        # 3️⃣ Extract text using MCP ingestion tools
+        # --- 3. Extract text ---
         if file.filename.endswith(".pdf"):
-            text_content = await asyncio.to_thread(read_pdf, os.path.abspath(file_location))
+            text = await asyncio.to_thread(read_pdf, file_path)
         elif file.filename.endswith(".docx"):
-            text_content = await asyncio.to_thread(read_docx, os.path.abspath(file_location))
+            text = await asyncio.to_thread(read_docx, file_path)
         else:
             job.status = JobStatus.failed
-            job.tasks.append({
-                "step": "text_extraction", 
-                "status": "failed", 
-                "error": "Unsupported file type"
-            })
-            session.commit()
-            return {"message": "Unsupported file type", "job_id": job.id}
+            db.commit()
+            raise HTTPException(400, "Unsupported file type")
 
-        job.progress = 0.60
-        job.tasks.append({
-            "step": "text_extracted", 
-            "status": "completed", 
-            "characters": len(text_content)
-        })
-        session.commit()
+        job.tasks.append({"step": "text_extracted", "size": len(text)})
+        job.progress = 0.6
+        db.commit()
 
-        # 4️⃣ Add document to PGVector
-        chunks_added = await asyncio.to_thread(add_document, text_content, source=file.filename)
+        # --- 4. Add to vector DB ---
+        chunks = await asyncio.to_thread(add_document, text, file.filename)
 
-        job.progress = 1.0
+        job.tasks.append({"step": "indexed_chunks", "chunks": chunks})
         job.status = JobStatus.completed
-        job.tasks.append({
-            "step": "vector_indexing",
-            "status": "completed",
-            "chunks": chunks_added
-        })
-        session.commit()
+        job.progress = 1.0
+        db.commit()
 
-        # 5️⃣ Return response
         return {
-            "message": "File ingested successfully",
+            "message": "Ingest successful",
             "job_id": job.id,
-            "chunks_added": chunks_added,
-            "content_preview": text_content[:200]
+            "chunks_added": chunks,
+            "preview": text[:200]
         }
 
     except Exception as e:
         job.status = JobStatus.failed
-        job.progress = 0.0
-        job.tasks.append({
-            "step": "ingestion_failed",
-            "status": "failed",
-            "error": str(e)
-        })
-        session.commit()
-
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        job.tasks.append({"step": "error", "error": str(e)})
+        db.commit()
+        raise HTTPException(500, f"Ingestion failed: {e}")
