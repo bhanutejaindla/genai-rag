@@ -1,64 +1,116 @@
-async def ingest_document(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
-):
-    # --- 1. Create Job ---
-    job = Job(
-        name=f"Ingest {file.filename}",
-        type="ingestion",
-        status=JobStatus.running,
-        user_id=1,          # TEMP — change after adding auth
-        progress=0.0,
-        tasks=[]
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
+<div class="auth-container">
+  <div class="auth-card">
+    <h2>Sign Up</h2>
+    <form (ngSubmit)="onSubmit()" #registerForm="ngForm">
+      <div class="form-group">
+        <label for="username">Username *</label>
+        <input
+          type="text"
+          id="username"
+          name="username"
+          [(ngModel)]="username"
+          required
+          minlength="3"
+          pattern="[a-zA-Z0-9_]+"
+          class="form-control"
+          [ngClass]="{'error': hasFieldError('username')}"
+          placeholder="Enter your username"
+        />
+        <div *ngIf="hasFieldError('username')" class="field-error">
+          {{ getFieldError('username') }}
+        </div>
+        <div class="field-hint">3+ characters, letters, numbers, and underscores only</div>
+      </div>
 
-    # --- 2. Save uploaded file ---
-    upload_dir = "uploads"
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, file.filename)
+      <div class="form-group">
+        <label for="email">Email *</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          [(ngModel)]="email"
+          required
+          class="form-control"
+          [ngClass]="{'error': hasFieldError('email')}"
+          placeholder="Enter your email"
+        />
+        <div *ngIf="hasFieldError('email')" class="field-error">
+          {{ getFieldError('email') }}
+        </div>
+      </div>
 
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+      <div class="form-group">
+        <label for="password">Password *</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          [(ngModel)]="password"
+          required
+          minlength="6"
+          maxlength="128"
+          class="form-control"
+          [ngClass]="{'error': hasFieldError('password')}"
+          placeholder="Enter your password"
+        />
+        <div *ngIf="hasFieldError('password')" class="field-error">
+          {{ getFieldError('password') }}
+        </div>
+        <div class="field-hint">6+ characters, must include uppercase, lowercase, and number</div>
+      </div>
 
-        job.tasks.append({"step": "file_saved", "path": file_path})
-        job.progress = 0.2
-        db.commit()
+      <div class="form-group">
+        <label for="confirmPassword">Confirm Password *</label>
+        <input
+          type="password"
+          id="confirmPassword"
+          name="confirmPassword"
+          [(ngModel)]="confirmPassword"
+          required
+          class="form-control"
+          [ngClass]="{'error': hasFieldError('confirmPassword')}"
+          placeholder="Confirm your password"
+        />
+        <div *ngIf="hasFieldError('confirmPassword')" class="field-error">
+          {{ getFieldError('confirmPassword') }}
+        </div>
+      </div>
 
-        # --- 3. Extract text ---
-        if file.filename.endswith(".pdf"):
-            text = await asyncio.to_thread(read_pdf, file_path)
-        elif file.filename.endswith(".docx"):
-            text = await asyncio.to_thread(read_docx, file_path)
-        else:
-            job.status = JobStatus.failed
-            db.commit()
-            raise HTTPException(400, "Unsupported file type")
+      <div class="form-group">
+        <label for="role">Role *</label>
+        <select
+          id="role"
+          name="role"
+          [(ngModel)]="role"
+          required
+          class="form-control"
+          [ngClass]="{'error': hasFieldError('role')}"
+        >
+          <option value="user">User</option>
+          <option value="admin">Admin</option>
+        </select>
+        <div *ngIf="hasFieldError('role')" class="field-error">
+          {{ getFieldError('role') }}
+        </div>
+        <div class="field-hint">Select your account role</div>
+      </div>
 
-        job.tasks.append({"step": "text_extracted", "size": len(text)})
-        job.progress = 0.6
-        db.commit()
+      <div *ngIf="errors['submit']" class="error-message">
+        {{ errors['submit'] }}
+      </div>
 
-        # --- 4. Add to vector DB ---
-        chunks = await asyncio.to_thread(add_document, text, file.filename)
+      <button
+        type="submit"
+        class="btn btn-primary"
+        [disabled]="loading"
+      >
+        {{ loading ? 'Creating account...' : 'Sign Up' }}
+      </button>
+    </form>
 
-        job.tasks.append({"step": "indexed_chunks", "chunks": chunks})
-        job.status = JobStatus.completed
-        job.progress = 1.0
-        db.commit()
+    <p class="auth-link">
+      Already have an account? <a routerLink="/login">Login</a>
+    </p>
+  </div>
+</div>
 
-        return {
-            "message": "Ingest successful",
-            "job_id": job.id,
-            "chunks_added": chunks,
-            "preview": text[:200]
-        }
-
-    except Exception as e:
-        job.status = JobStatus.failed
-        job.tasks.append({"step": "error", "error": str(e)})
-        db.commit()
-        raise HTTPException(500, f"Ingestion failed: {e}")
