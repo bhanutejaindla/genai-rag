@@ -1,201 +1,141 @@
-<div class="auth-container">
-  <div class="auth-card">
-    <h2>Login</h2>
-    <form (ngSubmit)="onSubmit()" #loginForm="ngForm">
-      <div class="form-group">
-        <label for="email">Email</label>
-        <input
-          type="email"
-          id="email"
-          name="email"
-          [(ngModel)]="email"
-          required
-          class="form-control"
-          placeholder="Enter your email"
-        />
-      </div>
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable, BehaviorSubject, tap } from 'rxjs';
+import { environment } from '../../environments/environment';
 
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input
-          type="password"
-          id="password"
-          name="password"
-          [(ngModel)]="password"
-          required
-          class="form-control"
-          placeholder="Enter your password"
-        />
-      </div>
-
-      <div *ngIf="error" class="error-message">
-        {{ error }}
-      </div>
-
-      <button
-        type="submit"
-        class="btn btn-primary"
-        [disabled]="loading || !loginForm.valid"
-      >
-        {{ loading ? 'Logging in...' : 'Login' }}
-      </button>
-    </form>
-
-    <p class="auth-link">
-      Don't have an account? <a routerLink="/register">Sign up</a>
-    </p>
-  </div>
-</div>
-
-
-
-.auth-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
+export interface LoginRequest {
+  email: string;
+  password: string;
 }
 
-.auth-card {
-  background: white;
-  border-radius: 12px;
-  padding: 40px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-  width: 100%;
-  max-width: 400px;
+export interface SignupRequest {
+  username: string;
+  email: string;
+  password: string;
+  role: 'user' | 'admin';
 }
 
-.auth-card h2 {
-  margin: 0 0 30px 0;
-  color: #333;
-  text-align: center;
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
 }
 
-.form-group {
-  margin-bottom: 20px;
+export interface User {
+  id: number;
+  username: string;
+  email: string;
+  name: string;
+  role?: 'user' | 'admin';
 }
 
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  color: #555;
-  font-weight: 500;
-}
-
-.form-control {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-  transition: border-color 0.3s;
-  box-sizing: border-box;
-}
-
-.form-control:focus {
-  outline: none;
-  border-color: #667eea;
-}
-
-.btn {
-  width: 100%;
-  padding: 12px;
-  border: none;
-  border-radius: 6px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.3s;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.error-message {
-  color: #e74c3c;
-  margin-bottom: 15px;
-  padding: 10px;
-  background: #fee;
-  border-radius: 6px;
-  font-size: 14px;
-}
-
-.auth-link {
-  text-align: center;
-  margin-top: 20px;
-  color: #666;
-}
-
-.auth-link a {
-  color: #667eea;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.auth-link a:hover {
-  text-decoration: underline;
-}
-
-
-
-import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
-import { AuthService } from '../../../services/auth.service';
-
-@Component({
-  selector: 'app-login',
-  standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
-  templateUrl: './login.component.html',
-  styleUrls: ['./login.component.css']
+@Injectable({
+  providedIn: 'root'
 })
-export class LoginComponent {
-  email: string = '';
-  password: string = '';
-  error: string = '';
-  loading: boolean = false;
+export class AuthService {
+  private http = inject(HttpClient);
 
-  constructor(
-    private authService: AuthService,
-    private router: Router
-  ) {}
+  private accessKey = 'access_token';
+  private refreshKey = 'refresh_token';
 
-  onSubmit() {
-    if (!this.email || !this.password) {
-      this.error = 'Please fill in all fields';
+  private currentUserSubject = new BehaviorSubject<User | null>(null);
+  public currentUser$ = this.currentUserSubject.asObservable();
+
+  constructor() {
+    this.loadUserFromToken();
+  }
+
+  // ---------------------------
+  // AUTH API CALLS
+  // ---------------------------
+
+  login(credentials: LoginRequest): Observable<AuthResponse> {
+    const formData = new FormData();
+    formData.append('username', credentials.email); // FastAPI expects "username"
+    formData.append('password', credentials.password);
+
+    return this.http.post<AuthResponse>(`${environment.apiBaseUrl}/auth/login`, formData).pipe(
+      tap(res => {
+        this.setTokens(res.access_token, res.refresh_token);
+        this.loadUserFromToken();
+      })
+    );
+  }
+
+  signup(data: SignupRequest): Observable<AuthResponse> {
+    return this.http.post<AuthResponse>(`${environment.apiBaseUrl}/auth/signup`, data).pipe(
+      tap(res => {
+        this.setTokens(res.access_token, res.refresh_token);
+        this.loadUserFromToken();
+      })
+    );
+  }
+
+  // ---------------------------
+  // TOKEN HANDLING
+  // ---------------------------
+
+  private setTokens(access: string, refresh: string): void {
+    localStorage.setItem(this.accessKey, access);
+    localStorage.setItem(this.refreshKey, refresh);
+  }
+
+  getAccessToken(): string | null {
+    return localStorage.getItem(this.accessKey);
+  }
+
+  getRefreshToken(): string | null {
+    return localStorage.getItem(this.refreshKey);
+  }
+
+  logout(): void {
+    localStorage.removeItem(this.accessKey);
+    localStorage.removeItem(this.refreshKey);
+    this.currentUserSubject.next(null);
+  }
+
+  isAuthenticated(): boolean {
+    return !!this.getAccessToken();
+  }
+
+  // ---------------------------
+  // DECODE USER FROM JWT
+  // ---------------------------
+
+  private loadUserFromToken(): void {
+    const token = this.getAccessToken();
+    if (!token) {
+      this.currentUserSubject.next(null);
       return;
     }
 
-    this.loading = true;
-    this.error = '';
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
 
-    this.authService.login({
-      username: this.email,
-      password: this.password
-    }).subscribe({
-      next: () => {
-        this.router.navigate(['/dashboard']);
-      },
-      error: (err) => {
-        this.error = err.error?.detail || 'Login failed. Please check your credentials.';
-        this.loading = false;
-      }
-    });
+      this.currentUserSubject.next({
+        id: 0,
+        username: payload.username || payload.sub?.split('@')[0] || 'user',
+        email: payload.sub,
+        name: payload.username || payload.sub?.split('@')[0],
+        role: payload.role || 'user'
+      });
+
+    } catch (e) {
+      console.error('Invalid JWT token:', e);
+      this.currentUserSubject.next(null);
+    }
+  }
+
+  getUserRole(): 'user' | 'admin' | null {
+    return this.currentUserSubject.value?.role || null;
+  }
+
+  isAdmin(): boolean {
+    return this.getUserRole() === 'admin';
+  }
+
+  getAuthHeaders(): { [key: string]: string } {
+    const token = this.getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }
 }
-
