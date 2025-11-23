@@ -1,116 +1,123 @@
-<div class="auth-container">
-  <div class="auth-card">
-    <h2>Sign Up</h2>
-    <form (ngSubmit)="onSubmit()" #registerForm="ngForm">
-      <div class="form-group">
-        <label for="username">Username *</label>
-        <input
-          type="text"
-          id="username"
-          name="username"
-          [(ngModel)]="username"
-          required
-          minlength="3"
-          pattern="[a-zA-Z0-9_]+"
-          class="form-control"
-          [ngClass]="{'error': hasFieldError('username')}"
-          placeholder="Enter your username"
-        />
-        <div *ngIf="hasFieldError('username')" class="field-error">
-          {{ getFieldError('username') }}
-        </div>
-        <div class="field-hint">3+ characters, letters, numbers, and underscores only</div>
-      </div>
+.auth-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
 
-      <div class="form-group">
-        <label for="email">Email *</label>
-        <input
-          type="email"
-          id="email"
-          name="email"
-          [(ngModel)]="email"
-          required
-          class="form-control"
-          [ngClass]="{'error': hasFieldError('email')}"
-          placeholder="Enter your email"
-        />
-        <div *ngIf="hasFieldError('email')" class="field-error">
-          {{ getFieldError('email') }}
-        </div>
-      </div>
+.auth-card {
+  background: white;
+  border-radius: 12px;
+  padding: 40px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 400px;
+}
 
-      <div class="form-group">
-        <label for="password">Password *</label>
-        <input
-          type="password"
-          id="password"
-          name="password"
-          [(ngModel)]="password"
-          required
-          minlength="6"
-          maxlength="128"
-          class="form-control"
-          [ngClass]="{'error': hasFieldError('password')}"
-          placeholder="Enter your password"
-        />
-        <div *ngIf="hasFieldError('password')" class="field-error">
-          {{ getFieldError('password') }}
-        </div>
-        <div class="field-hint">6+ characters, must include uppercase, lowercase, and number</div>
-      </div>
+.auth-card h2 {
+  margin: 0 0 30px 0;
+  color: #333;
+  text-align: center;
+}
 
-      <div class="form-group">
-        <label for="confirmPassword">Confirm Password *</label>
-        <input
-          type="password"
-          id="confirmPassword"
-          name="confirmPassword"
-          [(ngModel)]="confirmPassword"
-          required
-          class="form-control"
-          [ngClass]="{'error': hasFieldError('confirmPassword')}"
-          placeholder="Confirm your password"
-        />
-        <div *ngIf="hasFieldError('confirmPassword')" class="field-error">
-          {{ getFieldError('confirmPassword') }}
-        </div>
-      </div>
+.form-group {
+  margin-bottom: 20px;
+}
 
-      <div class="form-group">
-        <label for="role">Role *</label>
-        <select
-          id="role"
-          name="role"
-          [(ngModel)]="role"
-          required
-          class="form-control"
-          [ngClass]="{'error': hasFieldError('role')}"
-        >
-          <option value="user">User</option>
-          <option value="admin">Admin</option>
-        </select>
-        <div *ngIf="hasFieldError('role')" class="field-error">
-          {{ getFieldError('role') }}
-        </div>
-        <div class="field-hint">Select your account role</div>
-      </div>
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: #555;
+  font-weight: 500;
+}
 
-      <div *ngIf="errors['submit']" class="error-message">
-        {{ errors['submit'] }}
-      </div>
+.form-control {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: border-color 0.3s;
+  box-sizing: border-box;
+}
 
-      <button
-        type="submit"
-        class="btn btn-primary"
-        [disabled]="loading"
-      >
-        {{ loading ? 'Creating account...' : 'Sign Up' }}
-      </button>
-    </form>
+.form-control:focus {
+  outline: none;
+  border-color: #667eea;
+}
 
-    <p class="auth-link">
-      Already have an account? <a routerLink="/login">Login</a>
-    </p>
-  </div>
-</div>
+.form-control.error {
+  border-color: #e74c3c;
+}
+
+.form-control.error:focus {
+  border-color: #e74c3c;
+}
+
+.field-error {
+  color: #e74c3c;
+  font-size: 12px;
+  margin-top: 5px;
+  display: block;
+}
+
+.field-hint {
+  color: #666;
+  font-size: 11px;
+  margin-top: 4px;
+  display: block;
+  font-style: italic;
+}
+
+.btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  color: #e74c3c;
+  margin-bottom: 15px;
+  padding: 10px;
+  background: #fee;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.auth-link {
+  text-align: center;
+  margin-top: 20px;
+  color: #666;
+}
+
+.auth-link a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.auth-link a:hover {
+  text-decoration: underline;
+}
 
