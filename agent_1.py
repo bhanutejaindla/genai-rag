@@ -1,160 +1,104 @@
-<div class="create-job-container">
-  <div class="create-job-card">
+<div class="progress-container">
+  <div class="progress-card">
     <div class="header">
-      <h2>Create Research Job</h2>
+      <h2>Job Progress</h2>
       <a routerLink="/dashboard" class="btn-link">← Back to Dashboard</a>
     </div>
 
-    <form (ngSubmit)="onSubmit()" #jobForm="ngForm">
-      <!-- Topic Input -->
-      <div class="form-group">
-        <label for="topic">Research Topic *</label>
-        <textarea
-          id="topic"
-          name="topic"
-          [(ngModel)]="topic"
-          required
-          minlength="3"
-          class="form-control"
-          rows="4"
-          placeholder="Enter the research topic or question you want to investigate..."
-        ></textarea>
-        <div *ngIf="errors['topic']" class="error-message">
-          {{ errors['topic'] }}
+    <div *ngIf="loading" class="loading">Loading job status...</div>
+    <div *ngIf="error" class="error-message">{{ error }}</div>
+
+    <div *ngIf="job && !loading" class="job-details">
+      <!-- Overall Progress -->
+      <div class="progress-section">
+        <div class="progress-header">
+          <h3>Overall Progress</h3>
+          <span class="job-status" [ngClass]="'status-' + job.status">
+            {{ job.status }}
+          </span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar">
+            <div class="progress-fill" [style.width.%]="job.progress"></div>
+          </div>
+          <span class="progress-text">{{ job.progress }}%</span>
         </div>
       </div>
 
-      <!-- Document Upload -->
-      <div class="form-group">
-        <label for="documents">Upload Documents (Optional)</label>
-        <div class="file-upload-area">
-          <input
-            type="file"
-            id="documents"
-            name="documents"
-            (change)="onFileSelected($event)"
-            multiple
-            accept=".pdf,.docx,.txt"
-            class="file-input"
-          />
-          <label for="documents" class="file-label">
-            <span class="upload-icon">📄</span>
-            <span>Click to upload or drag and drop</span>
-            <span class="file-hint">PDF, DOCX, TXT files only</span>
-          </label>
+      <!-- Job Info -->
+      <div class="info-section">
+        <div class="info-item">
+          <span class="info-label">Job ID:</span>
+          <span class="info-value">#{{ job.id }}</span>
         </div>
-        <div *ngIf="errors['documents']" class="error-message">
-          {{ errors['documents'] }}
+        <div class="info-item">
+          <span class="info-label">Type:</span>
+          <span class="info-value">{{ job.type }}</span>
         </div>
+        <div class="info-item">
+          <span class="info-label">Created:</span>
+          <span class="info-value">{{ job.created_at | date:'medium' }}</span>
+        </div>
+        <div class="info-item" *ngIf="job.started_at">
+          <span class="info-label">Started:</span>
+          <span class="info-value">{{ job.started_at | date:'medium' }}</span>
+        </div>
+      </div>
 
-        <!-- Uploaded Files List -->
-        <div *ngIf="documents.length > 0" class="files-list">
-          <div *ngFor="let file of documents; let i = index" class="file-item">
-            <span class="file-name">{{ file.name }}</span>
-            <span class="file-size">{{ formatFileSize(file.size) }}</span>
-            <button
-              type="button"
-              class="btn-remove"
-              (click)="removeDocument(i)"
-            >
-              ✕
-            </button>
+      <!-- Tool Status -->
+      <div class="tools-section" *ngIf="job.tasks && job.tasks.length > 0">
+        <h3>Tool Status</h3>
+        <div class="tools-list">
+          <div *ngFor="let task of job.tasks" class="tool-item">
+            <div class="tool-header">
+              <span class="tool-name">{{ task.name || 'Unknown Tool' }}</span>
+              <span class="tool-status" [ngClass]="'status-' + getTaskStatus(task)">
+                {{ getTaskStatus(task) }}
+              </span>
+            </div>
+            <div class="tool-progress" *ngIf="getTaskStatus(task) === 'running'">
+              <div class="progress-bar small">
+                <div class="progress-fill" [style.width.%]="getTaskProgress(task)"></div>
+              </div>
+              <span class="progress-text">{{ getTaskProgress(task) }}%</span>
+            </div>
+            <div class="tool-message" *ngIf="task.message">
+              {{ task.message }}
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Tool Configuration -->
-      <div class="form-group">
-        <label>Tool Configuration *</label>
-        <div class="tools-config">
-          <label class="tool-item">
-            <input
-              type="checkbox"
-              [(ngModel)]="toolConfig.web_search"
-              name="web_search"
-            />
-            <span class="tool-label">
-              <strong>Web Search</strong>
-              <span class="tool-desc">Search the web for relevant information</span>
-            </span>
-          </label>
-
-          <label class="tool-item">
-            <input
-              type="checkbox"
-              [(ngModel)]="toolConfig.rag"
-              name="rag"
-            />
-            <span class="tool-label">
-              <strong>RAG (Retrieval Augmented Generation)</strong>
-              <span class="tool-desc">Query uploaded documents and knowledge base</span>
-            </span>
-          </label>
-
-          <label class="tool-item">
-            <input
-              type="checkbox"
-              [(ngModel)]="toolConfig.compliance"
-              name="compliance"
-            />
-            <span class="tool-label">
-              <strong>Compliance Check</strong>
-              <span class="tool-desc">Redact PII and ensure compliance</span>
-            </span>
-          </label>
-
-          <label class="tool-item">
-            <input
-              type="checkbox"
-              [(ngModel)]="toolConfig.citation_validation"
-              name="citation_validation"
-            />
-            <span class="tool-label">
-              <strong>Citation Validation</strong>
-              <span class="tool-desc">Verify and validate citations in the report</span>
-            </span>
-          </label>
-        </div>
-        <div *ngIf="errors['tools']" class="error-message">
-          {{ errors['tools'] }}
-        </div>
-      </div>
-
-      <!-- Submit Error -->
-      <div *ngIf="errors['submit']" class="error-message">
-        {{ errors['submit'] }}
-      </div>
-
-      <!-- Submit Button -->
-      <div class="form-actions">
+      <!-- Actions -->
+      <div class="actions-section">
         <button
-          type="button"
-          class="btn btn-secondary"
-          routerLink="/dashboard"
+          *ngIf="job.status === 'running' || job.status === 'pending'"
+          class="btn btn-danger"
+          (click)="cancelJob()"
         >
-          Cancel
+          Cancel Job
         </button>
         <button
-          type="submit"
+          *ngIf="job.status === 'completed'"
           class="btn btn-primary"
-          [disabled]="loading || !jobForm.valid"
+          [routerLink]="['/reports', job.id]"
         >
-          {{ loading ? 'Creating Job...' : 'Create Research Job' }}
+          View Report
         </button>
       </div>
-    </form>
+    </div>
   </div>
 </div>
 
 
-.create-job-container {
+.progress-container {
   min-height: 100vh;
   background: #f5f7fa;
   padding: 40px 20px;
 }
 
-.create-job-card {
-  max-width: 800px;
+.progress-card {
+  max-width: 900px;
   margin: 0 auto;
   background: white;
   border-radius: 12px;
@@ -184,182 +128,480 @@
   text-decoration: underline;
 }
 
-.form-group {
-  margin-bottom: 30px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
-  color: #555;
-  font-weight: 500;
-  font-size: 14px;
-}
-
-.form-control {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 14px;
-  font-family: inherit;
-  transition: border-color 0.3s;
-  box-sizing: border-box;
-}
-
-.form-control:focus {
-  outline: none;
-  border-color: #667eea;
-}
-
-.file-upload-area {
-  position: relative;
-  border: 2px dashed #ddd;
-  border-radius: 8px;
-  padding: 40px;
+.loading {
   text-align: center;
-  transition: all 0.3s;
-  cursor: pointer;
+  padding: 40px;
+  color: #666;
 }
 
-.file-upload-area:hover {
-  border-color: #667eea;
-  background: #f8f9ff;
-}
-
-.file-input {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  top: 0;
-  left: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.file-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  pointer-events: none;
-}
-
-.upload-icon {
-  font-size: 48px;
-}
-
-.file-hint {
-  font-size: 12px;
-  color: #999;
-}
-
-.files-list {
-  margin-top: 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.file-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  background: #f8f9fa;
+.error-message {
+  color: #e74c3c;
+  padding: 15px;
+  background: #fee;
   border-radius: 6px;
-  font-size: 14px;
+  margin-bottom: 20px;
 }
 
-.file-name {
-  flex: 1;
+.job-details {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.progress-section {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.progress-header h3 {
+  margin: 0;
   color: #333;
 }
 
-.file-size {
-  color: #666;
-  margin: 0 15px;
+.job-status {
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: capitalize;
 }
 
-.btn-remove {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  width: 24px;
-  height: 24px;
-  cursor: pointer;
-  font-size: 14px;
+.status-pending {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.status-running {
+  background: #d1ecf1;
+  color: #0c5460;
+}
+
+.status-completed {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-failed {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.progress-bar-container {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 15px;
 }
 
-.btn-remove:hover {
-  background: #c0392b;
+.progress-bar {
+  flex: 1;
+  height: 20px;
+  background: #e9ecef;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
 }
 
-.tools-config {
-  display: flex;
-  flex-direction: column;
+.progress-bar.small {
+  height: 12px;
+  width: 200px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  transition: width 0.5s ease;
+  border-radius: 10px;
+}
+
+.progress-text {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  min-width: 50px;
+  text-align: right;
+}
+
+.info-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 15px;
   padding: 20px;
   background: #f8f9fa;
   border-radius: 8px;
 }
 
-.tool-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  cursor: pointer;
-  padding: 12px;
-  border-radius: 6px;
-  transition: background 0.3s;
-}
-
-.tool-item:hover {
-  background: white;
-}
-
-.tool-item input[type="checkbox"] {
-  margin-top: 4px;
-  cursor: pointer;
-}
-
-.tool-label {
+.info-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex: 1;
+  gap: 5px;
 }
 
-.tool-label strong {
-  color: #333;
-  font-size: 14px;
-}
-
-.tool-desc {
-  color: #666;
+.info-label {
   font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.info-value {
+  font-size: 16px;
+  color: #333;
+  font-weight: 500;
+}
+
+.tools-section h3 {
+  margin: 0 0 20px 0;
+  color: #333;
+}
+
+.tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.tool-item {
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.tool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.tool-name {
+  font-weight: 500;
+  color: #333;
+  text-transform: capitalize;
+}
+
+.tool-status {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.tool-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tool-message {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+}
+
+.actions-section {
+  display: flex;
+  justify-content: flex-end;
+  gap: 15px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.btn-danger {
+  background: #e74c3c;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #c0392b;
+}
+
+
+import { Component, OnInit, OnDestroy } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ApiService, Job } from '../../../services/api.service';
+import { interval, Subscription } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
+
+@Component({
+  selector: 'app-progress',
+  standalone: true,
+  imports: [CommonModule, RouterModule],
+  templateUrl: './progress.component.html',
+  styleUrls: ['./progress.component.css']
+})
+export class ProgressComponent implements OnInit, OnDestroy {
+  jobId!: number;
+  job: Job | null = null;
+  loading: boolean = true;
+  error: string = '';
+  private subscription?: Subscription;
+  private pollInterval = 2000; // Poll every 2 seconds
+
+  constructor(
+    private route: ActivatedRoute,
+    private router: Router,
+    private apiService: ApiService
+  ) {}
+
+  ngOnInit() {
+    this.jobId = +this.route.snapshot.paramMap.get('id')!;
+    this.loadJob();
+    this.startPolling();
+  }
+
+  ngOnDestroy() {
+    if (this.subscription) {
+      this.subscription.unsubscribe();
+    }
+  }
+
+  loadJob() {
+    this.apiService.getJob(this.jobId).subscribe({
+      next: (job) => {
+        this.job = job;
+        this.loading = false;
+
+        // Redirect to report view if completed
+        if (job.status === 'completed') {
+          setTimeout(() => {
+            this.router.navigate(['/reports', job.id]);
+          }, 2000);
+        }
+      },
+      error: (err) => {
+        this.error = 'Failed to load job progress';
+        this.loading = false;
+      }
+    });
+  }
+
+  startPolling() {
+    this.subscription = interval(this.pollInterval)
+      .pipe(
+        switchMap(() => this.apiService.getJob(this.jobId))
+      )
+      .subscribe({
+        next: (job) => {
+          this.job = job;
+          if (job.status === 'completed' || job.status === 'failed') {
+            if (this.subscription) {
+              this.subscription.unsubscribe();
+            }
+          }
+        },
+        error: (err) => {
+          console.error('Error polling job:', err);
+        }
+      });
+  }
+
+  cancelJob() {
+    if (confirm('Are you sure you want to cancel this job?')) {
+      this.apiService.cancelJob(this.jobId).subscribe({
+        next: () => {
+          this.router.navigate(['/dashboard']);
+        },
+        error: (err) => {
+          this.error = 'Failed to cancel job';
+        }
+      });
+    }
+  }
+
+  getTaskStatus(task: any): string {
+    if (!task) return 'pending';
+    return task.status || 'pending';
+  }
+
+  getTaskProgress(task: any): number {
+    if (!task) return 0;
+    return task.progress || 0;
+  }
+}
+
+//report-edit
+<div class="edit-container">
+  <div class="edit-header">
+    <div class="header-content">
+      <div>
+        <h1>Edit Report #{{ reportId }}</h1>
+        <a [routerLink]="['/reports', reportId]" class="btn-link">← Back to Report</a>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary" (click)="downloadReport('docx')">Download DOCX</button>
+        <button class="btn btn-secondary" (click)="downloadReport('pdf')">Download PDF</button>
+        <button class="btn btn-secondary" (click)="cancel()">Cancel</button>
+        <button class="btn btn-primary" (click)="saveReport()" [disabled]="saving">
+          {{ saving ? 'Saving...' : 'Save Changes' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="edit-content">
+    <div *ngIf="loading" class="loading">Loading report...</div>
+    <div *ngIf="error" class="error-message">{{ error }}</div>
+
+    <div *ngIf="report && !loading" class="editor-wrapper">
+      <div class="editor-toolbar">
+        <span class="toolbar-info">Editing report content</span>
+        <span class="toolbar-hint">Changes will be saved as a new version</span>
+      </div>
+
+      <textarea
+        [(ngModel)]="editedContent"
+        class="content-editor"
+        placeholder="Enter report content..."
+      ></textarea>
+
+      <div class="editor-footer">
+        <div class="char-count">
+          {{ editedContent.length }} characters
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+.edit-container {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.edit-header {
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 20px 0;
+  margin-bottom: 30px;
+}
+
+.header-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.header-content h1 {
+  margin: 0 0 10px 0;
+  color: #333;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.edit-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: #666;
 }
 
 .error-message {
   color: #e74c3c;
-  margin-top: 8px;
-  font-size: 14px;
-  padding: 8px;
+  padding: 15px;
   background: #fee;
-  border-radius: 4px;
+  border-radius: 6px;
+  margin-bottom: 20px;
 }
 
-.form-actions {
+.editor-wrapper {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.editor-toolbar {
+  padding: 15px 20px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.toolbar-info {
+  font-weight: 500;
+  color: #333;
+}
+
+.toolbar-hint {
+  font-size: 12px;
+  color: #666;
+}
+
+.content-editor {
+  width: 100%;
+  min-height: 600px;
+  padding: 30px;
+  border: none;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 14px;
+  line-height: 1.8;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.content-editor:focus {
+  outline: none;
+}
+
+.editor-footer {
+  padding: 15px 20px;
+  background: #f8f9fa;
+  border-top: 1px solid #eee;
   display: flex;
   justify-content: flex-end;
-  gap: 15px;
-  margin-top: 30px;
-  padding-top: 30px;
-  border-top: 1px solid #eee;
+}
+
+.char-count {
+  font-size: 12px;
+  color: #666;
 }
 
 .btn {
@@ -395,288 +637,651 @@
   background: #5a6268;
 }
 
+.btn-link {
+  color: #667eea;
+  text-decoration: none;
+  font-size: 14px;
+}
 
-import { Component } from '@angular/core';
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterModule } from '@angular/router';
-import { ApiService, CreateJobRequest } from '../../../services/api.service';
+import { ApiService, Report } from '../../../services/api.service';
 
 @Component({
-  selector: 'app-create-job',
+  selector: 'app-report-edit',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
-  templateUrl: './create-job.component.html',
-  styleUrls: ['./create-job.component.css']
+  imports: [CommonModule, RouterModule, FormsModule],
+  templateUrl: './report-edit.component.html',
+  styleUrls: ['./report-edit.component.css']
 })
-export class CreateJobComponent {
-  topic: string = '';
-  documents: File[] = [];
-  toolConfig: { [key: string]: boolean } = {
-    web_search: true,
-    rag: true,
-    compliance: true,
-    citation_validation: true
-  };
-
-  errors: { [key: string]: string } = {};
-  loading: boolean = false;
+export class ReportEditComponent implements OnInit {
+  reportId!: number;
+  report: Report | null = null;
+  editedContent: string = '';
+  loading: boolean = true;
+  saving: boolean = false;
+  error: string = '';
 
   constructor(
-    private apiService: ApiService,
-    private router: Router
+    private route: ActivatedRoute,
+    private router: Router,
+    private apiService: ApiService
   ) {}
 
-  onFileSelected(event: any) {
-    const files = Array.from(event.target.files) as File[];
-    this.documents = [...this.documents, ...files];
-    this.errors['documents'] = '';
+  ngOnInit() {
+    this.reportId = +this.route.snapshot.paramMap.get('id')!;
+    this.loadReport();
   }
 
-  removeDocument(index: number) {
-    this.documents.splice(index, 1);
-  }
-
-  validate(): boolean {
-    this.errors = {};
-
-    if (!this.topic || this.topic.trim().length < 3) {
-      this.errors['topic'] = 'Topic must be at least 3 characters';
-      return false;
-    }
-
-    if (this.documents.length > 0) {
-      const invalidFiles = this.documents.filter(
-        file => !file.name.match(/\.(pdf|docx|txt)$/i)
-      );
-      if (invalidFiles.length > 0) {
-        this.errors['documents'] = 'Only PDF, DOCX, and TXT files are allowed';
-        return false;
-      }
-    }
-
-    const hasToolEnabled = Object.values(this.toolConfig).some(enabled => enabled);
-    if (!hasToolEnabled) {
-      this.errors['tools'] = 'At least one tool must be enabled';
-      return false;
-    }
-
-    return true;
-  }
-
-  onSubmit() {
-    if (!this.validate()) {
-      return;
-    }
-
-    this.loading = true;
-
-    const jobData: CreateJobRequest = {
-      topic: this.topic.trim(),
-      documents: this.documents.length > 0 ? this.documents : undefined,
-      tool_config: this.toolConfig
-    };
-
-    this.apiService.createJob(jobData).subscribe({
-      next: (response) => {
-        this.router.navigate(['/jobs', response.job_id, 'progress']);
+  loadReport() {
+    this.apiService.getReport(this.reportId).subscribe({
+      next: (report) => {
+        this.report = report;
+        this.editedContent = report.content;
+        this.loading = false;
       },
       error: (err) => {
-        this.errors['submit'] = err.error?.detail || 'Failed to create job. Please try again.';
+        this.error = 'Failed to load report';
         this.loading = false;
       }
     });
   }
 
-  formatFileSize(bytes: number): string {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-  }
-}
+  saveReport() {
+    if (!this.editedContent.trim()) {
+      this.error = 'Report content cannot be empty';
+      return;
+    }
 
+    this.saving = true;
+    this.error = '';
 
-import { Injectable } from '@angular/core';
-import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { environment } from '../../environments/environment';
-import { AuthService } from './auth.service';
-
-export interface Job {
-  id: number;
-  type: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  user_id: number;
-  progress: number;
-  tasks?: any[];
-  created_at: string;
-  started_at?: string;
-  updated_at: string;
-}
-
-export interface Report {
-  id: number;
-  job_id: number;
-  content: string;
-  citations?: any[];
-  created_at: string;
-}
-
-export interface CreateJobRequest {
-  topic: string;
-  documents?: File[];
-  tool_config?: {
-    [key: string]: boolean;
-  };
-}
-
-@Injectable({
-  providedIn: 'root'
-})
-export class ApiService {
-  constructor(
-    private http: HttpClient,
-    private authService: AuthService
-  ) {}
-
-  private getHeaders(): HttpHeaders {
-    const authHeaders = this.authService.getAuthHeaders();
-    return new HttpHeaders({
-      ...authHeaders,
-      'Content-Type': 'application/json'
+    this.apiService.updateReport(this.reportId, this.editedContent).subscribe({
+      next: (updatedReport) => {
+        this.saving = false;
+        this.router.navigate(['/reports', this.reportId]);
+      },
+      error: (err) => {
+        this.error = err.error?.detail || 'Failed to save report';
+        this.saving = false;
+      }
     });
   }
 
-  private getFormHeaders(): HttpHeaders {
-    const authHeaders = this.authService.getAuthHeaders();
-    return new HttpHeaders(authHeaders);
+  downloadReport(format: 'pdf' | 'docx') {
+    this.apiService.downloadReport(this.reportId, format).subscribe({
+      next: (blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report_${this.reportId}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      },
+      error: (err) => {
+        alert('Failed to download report');
+      }
+    });
   }
 
-  // Jobs
-  createJob(jobData: CreateJobRequest): Observable<{ job_id: number; status: string }> {
-    const formData = new FormData();
-    formData.append('topic', jobData.topic);
-    if (jobData.documents) {
-      jobData.documents.forEach(file => {
-        formData.append('documents', file);
-      });
+  cancel() {
+    if (confirm('Are you sure you want to discard your changes?')) {
+      this.router.navigate(['/reports', this.reportId]);
     }
-    if (jobData.tool_config) {
-      formData.append('tool_config', JSON.stringify(jobData.tool_config));
-    }
+  }
+}
 
-    return this.http.post<{ job_id: number; status: string }>(
-      `${environment.apiBaseUrl}/jobs`,
-      formData,
-      { headers: this.getFormHeaders() }
-    );
+
+//report-view
+
+<div class="report-container">
+  <div class="report-header">
+    <div class="header-content">
+      <div>
+        <h1>Report #{{ reportId }}</h1>
+        <a routerLink="/dashboard" class="btn-link">← Back to Dashboard</a>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary" (click)="editReport()">Edit</button>
+        <button class="btn btn-secondary" (click)="downloadReport('docx')">Download DOCX</button>
+        <button class="btn btn-secondary" (click)="downloadReport('pdf')">Download PDF</button>
+        <button class="btn btn-primary" (click)="toggleChat()">
+          {{ showChat ? 'Hide' : 'Show' }} Chat
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="report-content-wrapper">
+    <div class="report-content" [class.with-chat]="showChat">
+      <div *ngIf="loading" class="loading">Loading report...</div>
+      <div *ngIf="error" class="error-message">{{ error }}</div>
+
+      <div *ngIf="report && !loading" class="report-body">
+        <div class="report-meta">
+          <span class="meta-item">Created: {{ report.created_at | date:'medium' }}</span>
+          <span class="meta-item" *ngIf="report.citations">
+            Citations: {{ report.citations.length }}
+          </span>
+        </div>
+
+        <div class="report-text" [innerHTML]="parseContent(report.content)"></div>
+
+        <!-- Citations Section -->
+        <div *ngIf="report.citations && report.citations.length > 0" class="citations-section">
+          <h3>Citations</h3>
+          <div class="citations-list">
+            <div *ngFor="let citation of report.citations; let i = index" class="citation-item">
+              <span class="citation-number">[{{ i + 1 }}]</span>
+              <div class="citation-content">
+                <div class="citation-title" *ngIf="citation.title">{{ citation.title }}</div>
+                <div class="citation-url" *ngIf="citation.url">
+                  <a [href]="citation.url" target="_blank">{{ citation.url }}</a>
+                </div>
+                <div class="citation-snippet" *ngIf="citation.snippet">{{ citation.snippet }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat Panel -->
+    <div class="chat-panel" *ngIf="showChat">
+      <div class="chat-header">
+        <h3>Chat about this Report</h3>
+        <p class="chat-subtitle">Ask questions about the report content</p>
+      </div>
+
+      <div class="chat-messages">
+        <div *ngFor="let message of messages" class="message" [ngClass]="'message-' + message.role">
+          <div class="message-header">
+            <span class="message-role">{{ message.role === 'user' ? 'You' : 'Assistant' }}</span>
+            <span class="message-time">{{ message.timestamp | date:'short' }}</span>
+          </div>
+          <div class="message-content">{{ message.content }}</div>
+        </div>
+        <div *ngIf="chatLoading" class="message message-assistant">
+          <div class="message-content">Thinking...</div>
+        </div>
+      </div>
+
+      <div class="chat-input-area">
+        <form (ngSubmit)="sendChatMessage()" class="chat-form">
+          <input
+            type="text"
+            [(ngModel)]="chatInput"
+            name="chatInput"
+            class="chat-input"
+            placeholder="Ask a question about the report..."
+            [disabled]="chatLoading"
+          />
+          <button type="submit" class="btn btn-primary" [disabled]="chatLoading || !chatInput.trim()">
+            Send
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+.report-container {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.report-header {
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 20px 0;
+  margin-bottom: 30px;
+}
+
+.header-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.header-content h1 {
+  margin: 0 0 10px 0;
+  color: #333;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.report-content-wrapper {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  gap: 30px;
+}
+
+.report-content {
+  flex: 1;
+  background: white;
+  border-radius: 12px;
+  padding: 40px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.report-content.with-chat {
+  max-width: 60%;
+}
+
+.loading, .error-message {
+  text-align: center;
+  padding: 40px;
+  color: #666;
+}
+
+.error-message {
+  color: #e74c3c;
+  background: #fee;
+  border-radius: 6px;
+}
+
+.report-meta {
+  display: flex;
+  gap: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 30px;
+  font-size: 14px;
+  color: #666;
+}
+
+.meta-item {
+  padding: 6px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.report-text {
+  line-height: 1.8;
+  color: #333;
+  font-size: 16px;
+  margin-bottom: 40px;
+}
+
+.report-text .citation {
+  background: #fff3cd;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #856404;
+  cursor: pointer;
+}
+
+.report-text .citation:hover {
+  background: #ffeaa7;
+}
+
+.citations-section {
+  margin-top: 40px;
+  padding-top: 30px;
+  border-top: 2px solid #eee;
+}
+
+.citations-section h3 {
+  margin: 0 0 20px 0;
+  color: #333;
+}
+
+.citations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.citation-item {
+  display: flex;
+  gap: 15px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #667eea;
+}
+
+.citation-number {
+  font-weight: 600;
+  color: #667eea;
+  min-width: 40px;
+}
+
+.citation-content {
+  flex: 1;
+}
+
+.citation-title {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 5px;
+}
+
+.citation-url {
+  margin-bottom: 5px;
+}
+
+.citation-url a {
+  color: #667eea;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.citation-url a:hover {
+  text-decoration: underline;
+}
+
+.citation-snippet {
+  color: #666;
+  font-size: 14px;
+  font-style: italic;
+  margin-top: 5px;
+}
+
+.chat-panel {
+  width: 400px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 200px);
+  position: sticky;
+  top: 20px;
+}
+
+.chat-header {
+  padding: 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.chat-header h3 {
+  margin: 0 0 5px 0;
+  color: #333;
+}
+
+.chat-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: #666;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.message-user {
+  align-items: flex-end;
+}
+
+.message-assistant {
+  align-items: flex-start;
+}
+
+.message-header {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: #999;
+}
+
+.message-role {
+  font-weight: 500;
+}
+
+.message-content {
+  padding: 12px 16px;
+  border-radius: 12px;
+  max-width: 80%;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.message-user .message-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.message-assistant .message-content {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.chat-input-area {
+  padding: 20px;
+  border-top: 1px solid #eee;
+}
+
+.chat-form {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.chat-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #6c757d;
+  color: white;
+}
+
+.btn-secondary:hover {
+  background: #5a6268;
+}
+
+.btn-link {
+  color: #667eea;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1200px) {
+  .report-content-wrapper {
+    flex-direction: column;
   }
 
-  getJob(jobId: number): Observable<Job> {
-    return this.http.get<Job>(
-      `${environment.apiBaseUrl}/jobs/${jobId}`,
-      { headers: this.getHeaders() }
-    );
+  .report-content.with-chat {
+    max-width: 100%;
   }
 
-  getJobs(params?: { page?: number; limit?: number; status?: string }): Observable<{ jobs: Job[]; total: number }> {
-    let httpParams = new HttpParams();
-    if (params?.page) httpParams = httpParams.set('page', params.page);
-    if (params?.limit) httpParams = httpParams.set('limit', params.limit);
-    if (params?.status) httpParams = httpParams.set('status', params.status);
-
-    return this.http.get<{ jobs: Job[]; total: number }>(
-      `${environment.apiBaseUrl}/jobs`,
-      { headers: this.getHeaders(), params: httpParams }
-    );
+  .chat-panel {
+    width: 100%;
+    height: 500px;
+    position: relative;
   }
+}
 
-  cancelJob(jobId: number): Observable<void> {
-    return this.http.post<void>(
-      `${environment.apiBaseUrl}/jobs/${jobId}/cancel`,
-      {},
-      { headers: this.getHeaders() }
-    );
-  }
+import { Component, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { FormsModule } from '@angular/forms';
+import { ApiService, Report } from '../../../services/api.service';
 
-  // Reports
-  getReport(reportId: number): Observable<Report> {
-    return this.http.get<Report>(
-      `${environment.apiBaseUrl}/reports/${reportId}`,
-      { headers: this.getHeaders() }
-    );
-  }
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: Date;
+}
 
-  getReports(jobId?: number): Observable<Report[]> {
-    let url = `${environment.apiBaseUrl}/reports`;
-    if (jobId) {
-      url += `?job_id=${jobId}`;
-    }
-    return this.http.get<Report[]>(url, { headers: this.getHeaders() });
-  }
-
-  downloadReport(reportId: number, format: 'pdf' | 'docx'): Observable<Blob> {
-    return this.http.get(
-      `${environment.apiBaseUrl}/reports/${reportId}/download?format=${format}`,
-      { headers: this.getHeaders(), responseType: 'blob' }
-    );
-  }
-
-  updateReport(reportId: number, content: string): Observable<Report> {
-    return this.http.put<Report>(
-      `${environment.apiBaseUrl}/reports/${reportId}`,
-      { content },
-      { headers: this.getHeaders() }
-    );
-  }
+@Component({
+  selector: 'app-report-view',
+  standalone: true,
+  imports: [CommonModule, RouterModule, FormsModule],
+  templateUrl: './report-view.component.html',
+  styleUrls: ['./report-view.component.css']
+})
+export class ReportViewComponent implements OnInit {
+  reportId!: number;
+  report: Report | null = null;
+  loading: boolean = true;
+  error: string = '';
 
   // Chat
-  sendChatMessage(message: string, reportId?: number): Observable<{ response: string }> {
-    const body: any = { message };
-    if (reportId) {
-      body.report_id = reportId;
-    }
-    return this.http.post<{ response: string }>(
-      `${environment.apiBaseUrl}/chat`,
-      body,
-      { headers: this.getHeaders() }
-    );
+  messages: Message[] = [];
+  chatInput: string = '';
+  chatLoading: boolean = false;
+  showChat: boolean = false;
+
+  constructor(
+    private route: ActivatedRoute,
+    private router: Router,
+    private apiService: ApiService
+  ) {}
+
+  ngOnInit() {
+    this.reportId = +this.route.snapshot.paramMap.get('id')!;
+    this.loadReport();
   }
 
-  // Admin
-  getAdminMetrics(): Observable<any> {
-    return this.http.get(
-      `${environment.apiBaseUrl}/admin/metrics`,
-      { headers: this.getHeaders() }
-    );
+  loadReport() {
+    this.apiService.getReport(this.reportId).subscribe({
+      next: (report) => {
+        this.report = report;
+        this.loading = false;
+      },
+      error: (err) => {
+        this.error = 'Failed to load report';
+        this.loading = false;
+      }
+    });
   }
 
-  getToolRegistry(): Observable<any[]> {
-    return this.http.get<any[]>(
-      `${environment.apiBaseUrl}/admin/tools`,
-      { headers: this.getHeaders() }
-    );
+  toggleChat() {
+    this.showChat = !this.showChat;
   }
 
-  updateToolQuota(toolId: string, quota: number): Observable<void> {
-    return this.http.put<void>(
-      `${environment.apiBaseUrl}/admin/tools/${toolId}/quota`,
-      { quota },
-      { headers: this.getHeaders() }
-    );
+  sendChatMessage() {
+    if (!this.chatInput.trim()) return;
+
+    const userMessage: Message = {
+      role: 'user',
+      content: this.chatInput,
+      timestamp: new Date()
+    };
+    this.messages.push(userMessage);
+    this.chatInput = '';
+    this.chatLoading = true;
+
+    this.apiService.sendChatMessage(userMessage.content, this.reportId).subscribe({
+      next: (response) => {
+        const assistantMessage: Message = {
+          role: 'assistant',
+          content: response.response,
+          timestamp: new Date()
+        };
+        this.messages.push(assistantMessage);
+        this.chatLoading = false;
+      },
+      error: (err) => {
+        const errorMessage: Message = {
+          role: 'assistant',
+          content: 'Sorry, I encountered an error. Please try again.',
+          timestamp: new Date()
+        };
+        this.messages.push(errorMessage);
+        this.chatLoading = false;
+      }
+    });
   }
 
-  // Document upload
-  uploadDocument(file: File): Observable<any> {
-    const formData = new FormData();
-    formData.append('file', file);
-    return this.http.post(
-      `${environment.apiBaseUrl}/ingest`,
-      formData,
-      { headers: this.getFormHeaders() }
-    );
+  downloadReport(format: 'pdf' | 'docx') {
+    this.apiService.downloadReport(this.reportId, format).subscribe({
+      next: (blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `report_${this.reportId}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      },
+      error: (err) => {
+        alert('Failed to download report');
+      }
+    });
+  }
+
+  editReport() {
+    this.router.navigate(['/reports', this.reportId, 'edit']);
+  }
+
+  parseContent(content: string): string {
+    // Simple markdown-like parsing for citations
+    return content
+      .replace(/\[citation:(\d+)\]/g, '<span class="citation">[Citation $1]</span>')
+      .replace(/\n/g, '<br>');
   }
 }
 
