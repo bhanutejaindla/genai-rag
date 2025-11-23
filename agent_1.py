@@ -1,38 +1,45 @@
-import asyncio
-import json
-from backend.kafka_client import KafkaProducerClient, TOPIC_NAME
-from datetime import datetime
+import requests
+import time
+import sys
+from sqlmodel import Session, select, create_engine
+from backend.models import Job
+import os
 
-async def produce_from_file(file_path: str):
-    producer = KafkaProducerClient()
-    await producer.start()
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgrespassword@localhost:5432/multiagent_db")
+engine = create_engine(DATABASE_URL)
+
+def test_chat_flow():
+    url = "http://localhost:8000/chat"
+    payload = {"message": "Who is the present CM of Telangana state?"}
+    
+    print(f"Sending request to {url}...")
     try:
-        with open(file_path, 'r') as f:
-            for line in f:
-                if line.strip():
-                    event = json.loads(line)
-                    # Ensure timestamp is present
-                    if "timestamp" not in event:
-                        event["timestamp"] = datetime.utcnow().isoformat()
-                    
-                    print(f"Sending event: {event}")
-                    await producer.send_message(TOPIC_NAME, event)
-                    await asyncio.sleep(1) # Simulate delay
-    finally:
-        await producer.stop()
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        print("Response received:")
+        print(data)
+        
+        job_id = data.get("job_id")
+        if not job_id:
+            print("Error: No job_id returned")
+            return
+
+        print(f"Monitoring Job {job_id}...")
+        for _ in range(10): # Poll for 10 seconds
+            with Session(engine) as session:
+                job = session.get(Job, job_id)
+                if job:
+                    print(f"Job Status: {job.status}, Progress: {job.progress}")
+                    if job.status == "completed" or job.progress == 1.0:
+                        print("Job completed successfully!")
+                        break
+                else:
+                    print("Job not found in DB")
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"Test failed: {e}")
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python produce_events.py <file_path>")
-        # Create a dummy file for testing if not provided
-        with open("events.jsonl", "w") as f:
-            # Note: Job IDs must match what's in the DB. 
-            # Since we can't know the ID ahead of time, we'll use a placeholder '1' 
-            # assuming the first job created will have ID 1.
-            f.write('{"job_id": 1, "status": "running", "progress": 0.5}\n')
-            f.write('{"job_id": 1, "status": "completed", "progress": 1.0}\n')
-        print("Created dummy events.jsonl with Job ID 1")
-        asyncio.run(produce_from_file("events.jsonl"))
-    else:
-        asyncio.run(produce_from_file(sys.argv[1]))
+    test_chat_flow()
