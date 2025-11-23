@@ -1,141 +1,60 @@
-import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject, tap } from 'rxjs';
-import { environment } from '../../environments/environment';
+<div class="dashboard-container">
+  <header class="dashboard-header">
+    <h1>Research Dashboard</h1>
+    <div class="user-info">
+      <span>Welcome, {{ (authService.currentUser$ | async)?.name }}</span>
+      <button (click)="authService.logout()" class="btn btn-outline">Logout</button>
+    </div>
+  </header>
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
+  <div class="actions-bar">
+    <a routerLink="/jobs/create" class="btn btn-primary">+ New Research Job</a>
+  </div>
 
-export interface SignupRequest {
-  username: string;
-  email: string;
-  password: string;
-  role: 'user' | 'admin';
-}
+  <div class="jobs-list-container">
+    <h2>Recent Jobs</h2>
 
-export interface AuthResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-}
+    <div *ngIf="loading" class="loading-spinner">Loading jobs...</div>
 
-export interface User {
-  id: number;
-  username: string;
-  email: string;
-  name: string;
-  role?: 'user' | 'admin';
-}
+    <div *ngIf="error" class="error-message">{{ error }}</div>
 
-@Injectable({
-  providedIn: 'root'
-})
-export class AuthService {
-  private http = inject(HttpClient);
+    <div *ngIf="!loading && jobs.length === 0" class="empty-state">
+      <p>No jobs found. Start a new research task!</p>
+    </div>
 
-  private accessKey = 'access_token';
-  private refreshKey = 'refresh_token';
+    <table *ngIf="!loading && jobs.length > 0" class="jobs-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let job of jobs">
+          <td>#{{ job.id }}</td>
+          <td>{{ job.name || 'Untitled Job' }}</td>
+          <td>{{ job.type }}</td>
+          <td>
+            <span class="status-badge" [ngClass]="getStatusClass(job.status)">
+              {{ job.status }}
+            </span>
+          </td>
+          <td>{{ job.created_at | date:'short' }}</td>
+          <td>
+            <a [routerLink]="['/jobs', job.id]" class="btn btn-sm btn-secondary">View</a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
 
-  private currentUserSubject = new BehaviorSubject<User | null>(null);
-  public currentUser$ = this.currentUserSubject.asObservable();
-
-  constructor() {
-    this.loadUserFromToken();
-  }
-
-  // ---------------------------
-  // AUTH API CALLS
-  // ---------------------------
-
-  login(credentials: LoginRequest): Observable<AuthResponse> {
-    const formData = new FormData();
-    formData.append('username', credentials.email); // FastAPI expects "username"
-    formData.append('password', credentials.password);
-
-    return this.http.post<AuthResponse>(`${environment.apiBaseUrl}/auth/login`, formData).pipe(
-      tap(res => {
-        this.setTokens(res.access_token, res.refresh_token);
-        this.loadUserFromToken();
-      })
-    );
-  }
-
-  signup(data: SignupRequest): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${environment.apiBaseUrl}/auth/signup`, data).pipe(
-      tap(res => {
-        this.setTokens(res.access_token, res.refresh_token);
-        this.loadUserFromToken();
-      })
-    );
-  }
-
-  // ---------------------------
-  // TOKEN HANDLING
-  // ---------------------------
-
-  private setTokens(access: string, refresh: string): void {
-    localStorage.setItem(this.accessKey, access);
-    localStorage.setItem(this.refreshKey, refresh);
-  }
-
-  getAccessToken(): string | null {
-    return localStorage.getItem(this.accessKey);
-  }
-
-  getRefreshToken(): string | null {
-    return localStorage.getItem(this.refreshKey);
-  }
-
-  logout(): void {
-    localStorage.removeItem(this.accessKey);
-    localStorage.removeItem(this.refreshKey);
-    this.currentUserSubject.next(null);
-  }
-
-  isAuthenticated(): boolean {
-    return !!this.getAccessToken();
-  }
-
-  // ---------------------------
-  // DECODE USER FROM JWT
-  // ---------------------------
-
-  private loadUserFromToken(): void {
-    const token = this.getAccessToken();
-    if (!token) {
-      this.currentUserSubject.next(null);
-      return;
-    }
-
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-
-      this.currentUserSubject.next({
-        id: 0,
-        username: payload.username || payload.sub?.split('@')[0] || 'user',
-        email: payload.sub,
-        name: payload.username || payload.sub?.split('@')[0],
-        role: payload.role || 'user'
-      });
-
-    } catch (e) {
-      console.error('Invalid JWT token:', e);
-      this.currentUserSubject.next(null);
-    }
-  }
-
-  getUserRole(): 'user' | 'admin' | null {
-    return this.currentUserSubject.value?.role || null;
-  }
-
-  isAdmin(): boolean {
-    return this.getUserRole() === 'admin';
-  }
-
-  getAuthHeaders(): { [key: string]: string } {
-    const token = this.getAccessToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }
-}
+    <div class="pagination-controls" *ngIf="jobs.length > 0">
+      <button (click)="prevPage()" [disabled]="currentPage === 1" class="btn btn-sm">Previous</button>
+      <span class="page-info">Page {{ currentPage }}</span>
+      <button (click)="nextPage()" [disabled]="!hasMore" class="btn btn-sm">Next</button>
+    </div>
+  </div>
+</div>
