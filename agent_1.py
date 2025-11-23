@@ -1,41 +1,23 @@
-version: "3.8"
+report_paths = {}
+    try:
+        generator = ReportGenerator()
+        filename = f"report_{job_id}" if job_id else f"report_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        
+        docx_path = await asyncio.to_thread(generator.generate_docx, final_answer, filename)
+        pdf_path = await asyncio.to_thread(generator.generate_pdf, final_answer, filename)
+        
+        report_paths = {
+            "docx": docx_path,
+            "pdf": pdf_path
+        }
+        print(f"Reports generated: {report_paths}")
+    except Exception as e:
+        print(f"Report generation failed: {e}")
 
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:latest
-    container_name: zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
-
-  kafka:
-    image: confluentinc/cp-kafka:latest
-    container_name: kafka
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: postgres
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
-      POSTGRES_DB: multiagent_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-volumes:
-  postgres_data:
+    print("\n--- Agent Finished ---")
+    await send_event(job_id, "completed", 1.0)
+    
+    return {
+        "answer": final_answer,
+        "reports": report_paths
+    }
