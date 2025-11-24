@@ -1,34 +1,43 @@
 from __future__ import annotations
 
-from typing import Dict, Any
 import asyncio
+from typing import Dict, Any, List
 
 from .base import BaseAgent, AgentCard
-from ..rag import add_document, query_documents
+
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from mcp_servers.research.server import web_search  # type: ignore
 
 
-class IngestionRetrievalAgent(BaseAgent):
-    """Handles document ingestion and retrieval (RAG)."""
+class WebResearchAgent(BaseAgent):
+    """Performs grounded web searches and returns structured evidence."""
 
     def __init__(self) -> None:
         super().__init__(
             AgentCard(
-                name="ingestion_rag_agent",
-                description="Ingests documents, maintains vector store and serves retrieval results.",
-                capabilities=[
-                    "ingest_text",
-                    "retrieve",
-                ],
-                rate_limit_per_minute=15,
+                name="web_research_agent",
+                description="Executes grounded web searches and returns structured findings.",
+                capabilities=["search"],
+                rate_limit_per_minute=10,
             )
         )
 
-    async def ingest_text(self, content: str, source: str, job_id: int | None = None) -> Dict[str, Any]:
-        chunks_added = await asyncio.to_thread(add_document, content, source=source)
-        return {"chunks_added": chunks_added}
+    async def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        # 1. Run web search (returns List[Dict])
+        raw_results = await asyncio.to_thread(web_search, query, max_results=max_results)
 
-    async def retrieve(self, query: str, top_k: int = 5) -> str:
-        """Return raw retrieved text block."""
-        result = await asyncio.to_thread(query_documents, query)
-        return result
+        # 2. Format clean structure (No parsing needed as web_search returns structured data)
+        structured = [
+            {
+                "id": str(i+1),
+                "title": item.get("title"),
+                "url": item.get("url"),
+                "quote": item.get("body") or item.get("snippet") or item.get("description"),
+            }
+            for i, item in enumerate(raw_results)
+        ]
+
+        return structured
 
