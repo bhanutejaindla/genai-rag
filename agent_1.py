@@ -686,50 +686,43 @@ logger = structlog.get_logger()
 
 
 from langfuse import Langfuse
-from langfuse.client import LangfuseClient
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+from dotenv import load_dotenv
 import os
 
-# Pull credentials from environment
+load_dotenv()
+
 LANGFUSE_SECRET = os.getenv("LANGFUSE_SECRET_KEY")
 LANGFUSE_PUBLIC = os.getenv("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 
-# Initialize global client
+# Initialize Langfuse once (GLOBAL)
 langfuse = Langfuse(
     secret_key=LANGFUSE_SECRET,
     public_key=LANGFUSE_PUBLIC,
     host=LANGFUSE_HOST,
 )
 
-client = LangfuseClient(
-    secret_key=LANGFUSE_SECRET,
-    public_key=LANGFUSE_PUBLIC,
-    host=LANGFUSE_HOST,
-)
-
-# -------- Middleware for HTTP calls --------
-
+# Middleware
 class LangfuseMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         trace = langfuse.trace(
             name=f"{request.method} {request.url.path}",
-            input={"query_params": dict(request.query_params)},
+            input={"params": dict(request.query_params)},
         )
 
         response = await call_next(request)
 
-        trace.end(
-            output={"status_code": response.status_code},
-        )
+        trace.update(output={"status": response.status_code})
+        trace.end()
 
         return response
 
 
 def setup_langfuse_middleware(app):
-    """Attach Langfuse middleware to FastAPI."""
     app.add_middleware(LangfuseMiddleware)
+
 
 
 from .logging_config import configure_logging, logger
