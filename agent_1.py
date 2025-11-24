@@ -754,3 +754,222 @@ async def run_agent(query: str):
 
     return {"answer": final_answer}
 
+    
+
+import asyncio
+import os
+from datetime import datetime
+from typing import Optional
+
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+# RAG functions
+from .rag import query_documents
+
+# MCP tools
+from mcp_servers.research.server import web_search
+from mcp_servers.compliance.server import redact_pii
+from mcp_servers.citation_validation.server import (
+    verify_citations_internal,
+    parse_web_search_results
+)
+
+# Reports
+from .report_generator import ReportGenerator
+
+# Langfuse tracing
+from langfuse import Langfuse
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ------------------------
+# Langfuse Initialization
+# ------------------------
+langfuse = Langfuse(
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+)
+
+# ------------------------
+# LLM Initialization
+# ------------------------
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+
+# =====================================================================
+#                         MAIN AGENT PIPELINE
+# =====================================================================
+async def run_agent(
+    query: str,
+    job_id: Optional[int] = None,
+    generate_report: bool = False
+):
+    """
+    Full agent workflow with Langfuse tracing.
+
+    Steps:
+    1. Retrieve RAG context
+    2. Web search
+    3. Synthesize answer
+    4. Verify citations
+    5. Refine answer
+    6. Compliance
+    7. Optional: generate reports (pdf/docx)
+    """
+
+    trace = langfuse.trace(
+        name="research_agent",
+        input={"query": query, "job_id": job_id}
+    )
+
+    try:
+        # -------------------------------
+        # 1. Retrieve context (RAG)
+        # -------------------------------
+        step = trace.span(name="RAG:query_documents")
+        context = await asyncio.to_thread(query_documents, query)
+        step.end(output={"context_length": len(context)})
+
+        # -------------------------------
+        # 2. Web Search
+        # -------------------------------
+        step = trace.span(name="web_search")
+        try:
+            web_results = await asyncio.to_thread(web_search, query, max_results=5)
+        except Exception as e:
+            web_results = f"Search failed: {e}"
+        step.end(output={"web_results_preview": web_results[:200]})
+
+        # -------------------------------
+        # 3. Synthesize Answer
+        # -------------------------------
+        step = trace.span(name="llm_synthesis")
+
+        synthesis_prompt = ChatPromptTemplate.from_template(
+            """
+You are a research analyst. Use the following:
+
+Query: {query}
+
+Web Search Results:
+{web_results}
+
+Internal RAG Documents:
+{context}
+
+Instructions:
+- Cite using [1], [2], etc.
+- Use web results for recent facts.
+- Every fact MUST have a citation.
+
+Answer with citations:
+"""
+        )
+
+        chain = synthesis_prompt | llm
+        draft_answer = (await chain.ainvoke({
+            "query": query,
+            "context": context,
+            "web_results": web_results
+        })).content
+
+        step.end(output={"draft_preview": draft_answer[:200]})
+
+        # -------------------------------
+        # 4. Verify Citations
+        # -------------------------------
+        step = trace.span(name="citation_verification")
+
+        sources = await asyncio.to_thread(parse_web_search_results, web_results)
+        if context:
+            sources.append({
+                "id": "internal",
+                "title": "Internal RAG",
+                "text": context,
+                "url": "internal"
+            })
+
+        verification = await asyncio.to_thread(
+            verify_citations_internal,
+            draft_answer,
+            sources,
+            False
+        )
+
+        step.end(output=verification)
+
+        # -------------------------------
+        # 5. Refinement (if needed)
+        # -------------------------------
+        final_answer = draft_answer
+
+        if not verification["is_valid"] or verification["score"] < 0.8:
+            step = trace.span(name="llm_refinement")
+
+            refine_prompt = ChatPromptTemplate.from_template(
+                """
+Fix citation issues.
+
+QUERY: {query}
+
+ORIGINAL ANSWER:
+{draft_answer}
+
+VERIFICATION ISSUES:
+{issues}
+
+WEB RESULTS:
+{web_results}
+
+Corrected Answer:
+"""
+            )
+
+            chain = refine_prompt | llm
+            refinement = await chain.ainvoke({
+                "query": query,
+                "draft_answer": draft_answer,
+                "issues": "\n".join(verification["issues"]),
+                "web_results": web_results
+            })
+
+            final_answer = refinement.content
+            step.end(output={"refined_preview": final_answer[:200]})
+
+        # -------------------------------
+        # 6. Compliance (PII Redaction)
+        # -------------------------------
+        step = trace.span(name="compliance_redaction")
+        final_answer = await asyncio.to_thread(redact_pii, final_answer)
+        step.end(output={"final_preview": final_answer[:200]})
+
+        # -------------------------------
+        # 7. Report Generation
+        # -------------------------------
+        reports = {}
+        if generate_report:
+            step = trace.span(name="report_generation")
+
+            generator = ReportGenerator()
+            file_name = f"report_{job_id or datetime.utcnow().timestamp()}"
+
+            docx_path = await asyncio.to_thread(
+                generator.generate_docx, final_answer, file_name
+            )
+            pdf_path = await asyncio.to_thread(
+                generator.generate_pdf, final_answer, file_name
+            )
+
+            reports = {"docx": docx_path, "pdf": pdf_path}
+            step.end(output=reports)
+
+        # -------------------------------
+        trace.end(output={"answer": final_answer})
+        return {"answer": final_answer, "reports": reports}
+
+    except Exception as e:
+        trace.end(error=str(e))
+        raise e
