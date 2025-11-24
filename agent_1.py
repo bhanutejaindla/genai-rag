@@ -1,103 +1,48 @@
 from __future__ import annotations
 
-import asyncio
-import json
-from typing import Dict, Any
-
+from typing import List, Dict, Any
+from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 
 from .base import BaseAgent, AgentCard
-from ..report_generator import ReportGenerator
 
 
-class SynthesisReportAgent(BaseAgent):
-    """Generates structured reports from gathered evidence."""
+class ChatAgent(BaseAgent):
+    """Maintains chat history and provides conversational summaries."""
 
     def __init__(self) -> None:
         super().__init__(
             AgentCard(
-                name="synthesis_report_agent",
-                description="Creates structured research reports with inline citations and exports.",
-                capabilities=[
-                    "generate_sections",
-                    "produce_tables",
-                    "export_report",
-                ],
-                rate_limit_per_minute=6,
+                name="chat_agent",
+                description="Maintains conversation history and summarizes threads.",
+                capabilities=["store_history", "summarize_thread", "chat_memory"],
             )
         )
-
         self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        self.history: Dict[str, List[BaseMessage]] = {}
 
-        self.prompt = ChatPromptTemplate.from_template(
-            """
-You are the Synthesis & Report agent.
-Create a structured research report using ONLY the provided evidence.
+    # ---------------------------------------------------------------
+    # 1) Add message to conversation history
+    # ---------------------------------------------------------------
+    def append_message(self, thread_id: str, message: BaseMessage) -> None:
+        self.history.setdefault(thread_id, []).append(message)
 
-User Query: {query}
-Web Findings: {web_findings}
-Retrieved Evidence: {rag_context}
+    # ---------------------------------------------------------------
+    # 2) Retrieve full chat history for a thread
+    # ---------------------------------------------------------------
+    def get_history(self, thread_id: str) -> List[BaseMessage]:
+        return self.history.get(thread_id, [])
 
-Return STRICT JSON:
-{
-  "summary": "...",
-  "sections": [
-    {"title": "Section Title", "content": "Long content with citations [1]"}
-  ],
-  "tables": [
-    {"title": "Table Title", "rows": [["col1","col2"],["v1","v2"]]}
-  ],
-  "citations": [
-    {"id": 1, "source": "Title", "url": "...", "quote": "..."}
-  ]
-}
-"""
-        )
+    # ---------------------------------------------------------------
+    # 3) Summarize the conversation
+    # ---------------------------------------------------------------
+    async def summarize(self, thread_id: str) -> str:
+        history = self.get_history(thread_id)
+        if not history:
+            return "No conversation yet."
 
-        self.generator = ReportGenerator()
+        # Use the last 6 messages for short-memory summarization
+        recent_history = history[-6:]
 
-    async def generate_report(self, query: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
-        """Generates structured JSON report using LLM."""
-        chain = self.prompt | self.llm
-
-        response = await chain.ainvoke(
-            {
-                "query": query,
-                "web_findings": evidence.get("web_results", ""),
-                "rag_context": evidence.get("context", ""),
-            }
-        )
-
-        raw = response.content.strip()
-
-        # Handle triple-backtick code formatting
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-
-        # Parse JSON safely
-        try:
-            parsed = json.loads(raw)
-        except Exception as e:
-            parsed = {
-                "summary": raw,
-                "sections": [],
-                "tables": [],
-                "citations": [],
-                "error": f"JSON parsing failed: {str(e)}"
-            }
-
-        return parsed
-
-    async def export(self, final_answer: str, job_id: int | None = None) -> Dict[str, str]:
-        """Exports DOCX and PDF versions of the final report."""
-        filename = f"report_{job_id}" if job_id else "report_preview"
-
-        docx_path = await asyncio.to_thread(
-            self.generator.generate_docx, final_answer, filename
-        )
-        pdf_path = await asyncio.to_thread(
-            self.generator.generate_pdf, final_answer, filename
-        )
-
-        return {"docx": docx_path, "pdf": pdf_path}
+        response = await self.llm.ainvoke(recent_history)
+        return response.content
