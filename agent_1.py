@@ -1,77 +1,60 @@
 from __future__ import annotations
 
-from typing import Dict, Any
-from langchain_core.messages import HumanMessage, AIMessage
+import os
+import sys
+import asyncio
+from datetime import datetime
+from typing import Optional
 
-from .ingestion_agent import IngestionRetrievalAgent
-from .web_research_agent import WebResearchAgent
-from .synthesis_agent import SynthesisReportAgent
-from .citation_agent import CitationAgent
-from .compliance_agent import ComplianceAgent
-from .chat_agent import ChatAgent
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from langfuse.langchain import CallbackHandler
+
+# Fix path for MCP servers
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from .graph import graph
+from .agents.orchestrator_agent import OrchestratorAgent
+
+load_dotenv()
 
 
-class OrchestratorAgent:
-    """Plans and routes work across specialist agents using LangGraph or direct calls."""
+class ResearchAgent:
+    """Top-level agent that triggers the orchestrator graph."""
 
-    def __init__(self, graph_runner=None) -> None:
-        self.ingestion_agent = IngestionRetrievalAgent()
-        self.web_agent = WebResearchAgent()
-        self.synthesis_agent = SynthesisReportAgent()
-        self.citation_agent = CitationAgent()
-        self.compliance_agent = ComplianceAgent()
-        self.chat_agent = ChatAgent()
-        self.graph = graph_runner   # Optional
+    def __init__(self):
+        self.graph = graph
+        self.langfuse_handler = CallbackHandler()
 
-    # ------------------------------------------------------------------
-    # 1) MAIN RESEARCH FLOW (if LangGraph enabled)
-    # ------------------------------------------------------------------
-    async def run_research_flow(self, query: str, job_id: int | None = None) -> Dict[str, Any]:
-        """Execute the graph-based multi-agent research flow."""
-        if not self.graph:
-            raise RuntimeError("Graph runner not provided.")
+        # Initialize orchestrator with graph runner
+        self.orchestrator = OrchestratorAgent(graph_runner=self.graph)
 
-        initial_state = {
-            "messages": [HumanMessage(content=query)],
-            "next_step": "start",
-            "artifacts": {},
-            "research_data": {},
-            "final_report": {},
-            "job_id": job_id,
-        }
-
-        final_state = await self.graph.ainvoke(
-            initial_state,
-            config={"configurable": {"thread_id": str(job_id) if job_id else "adhoc"}},
+        # Load LLM (optional here, used by sub-agents)
+        api_key = os.getenv("OPENAI_API_KEY")
+        self.llm = (
+            ChatOpenAI(model="gpt-4o-mini", temperature=0, callbacks=[self.langfuse_handler])
+            if api_key else None
         )
 
-        final_answer = final_state["artifacts"].get("final_answer", "No answer generated.")
-        report_paths = final_state.get("final_report", {})
 
-        return {"answer": final_answer, "reports": report_paths}
+    async def run(self, query: str, thread_id: str = "default"):
+        """Runs a full research workflow via orchestrator."""
 
-    # ------------------------------------------------------------------
-    # 2) SIMPLE DIRECT CALL – Ingestion
-    # ------------------------------------------------------------------
-    async def ingest_and_retrieve(self, content: str, source: str, job_id: int | None = None):
-        return await self.ingestion_agent.ingest_text(content, source, job_id)
+        print(f"\n--- Starting ResearchAgent for Query: {query} ---")
 
-    async def retrieve_context(self, query: str):
-        return await self.ingestion_agent.retrieve(query)
+        try:
+            # thread_id is used only for chat tracking, not job_id
+            result = await self.orchestrator.run_research_flow(
+                query=query,
+                job_id=None        # IMPORTANT: job_id not tied to thread
+            )
 
-    # ------------------------------------------------------------------
-    # 3) CHAT HANDLER FOR FRONTEND
-    # ------------------------------------------------------------------
-    async def handle_chat(self, thread_id: str, message: str):
-        """Handle chat flow with saved conversation memory."""
-        human_msg = HumanMessage(content=message)
-        self.chat_agent.append_message(thread_id, human_msg)
+            return result
 
-        # Summarize conversation
-        summary = await self.chat_agent.summarize(thread_id)
-
-        # Store system/AI summarization back into history
-        ai_msg = AIMessage(content=summary)
-        self.chat_agent.append_message(thread_id, ai_msg)
-
-        return {"summary": summary, "conversation": self.chat_agent.get_history(thread_id)}
+        except Exception as e:
+            print(f"❌ ResearchAgent execution failed: {e}")
+            return {
+                "answer": f"Error occurred: {str(e)}",
+                "reports": {}
+            }
