@@ -93,4 +93,11 @@ Return STRICT JSON:
         """Exports DOCX and PDF versions of the final report."""
         filename = f"report_{job_id}" if job_id else "report_preview"
 
-        docx_path = await asyncio.to_
+        docx_path = await asyncio.to_thread(
+            self.generator.generate_docx, final_answer, filename
+        )
+        pdf_path = await asyncio.to_thread(
+            self.generator.generate_pdf, final_answer, filename
+        )
+
+        return {"docx": docx_path, "pdf": pdf_path}
