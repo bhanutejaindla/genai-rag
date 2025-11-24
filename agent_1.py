@@ -1,32 +1,36 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from .base import BaseAgent, AgentCard
 
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from mcp_servers.citation_validation.server import verify_citations_internal  # type: ignore
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from mcp_servers.compliance.server import redact_pii  # type: ignore
 
 
-class CitationAgent(BaseAgent):
-    """Verifies citations in the generated report against sources."""
+class ComplianceAgent(BaseAgent):
+    """Detects PII/sensitive content and enforces compliance policies."""
 
     def __init__(self) -> None:
         super().__init__(
             AgentCard(
-                name="citation_agent",
-                description="Verifies that citations in the text are supported by the provided sources.",
-                capabilities=["verify_citations"],
+                name="compliance_agent",
+                description="Applies compliance rules, redacts sensitive content, manages policy approvals.",
+                capabilities=["redact"],   # FIXED
                 rate_limit_per_minute=20,
             )
         )
 
-    async def verify(self, draft_answer: str, sources: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def redact(self, text: str, require_approval: bool = False) -> Dict[str, Any]:
         """
-        Verifies citations in the draft answer.
+        Redact sensitive information using MCP compliance tool.
         """
-        result = await asyncio.to_thread(verify_citations_internal, draft_answer, sources)
-        return result
+        redacted = await asyncio.to_thread(redact_pii, text)
+
+        return {
+            "redacted_text": redacted,
+            "approval_required": require_approval,
+        }
