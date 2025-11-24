@@ -1,36 +1,96 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Dict, Any
 
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
 from .base import BaseAgent, AgentCard
-
-import sys
-import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from mcp_servers.compliance.server import redact_pii  # type: ignore
+from ..report_generator import ReportGenerator
 
 
-class ComplianceAgent(BaseAgent):
-    """Detects PII/sensitive content and enforces compliance policies."""
+class SynthesisReportAgent(BaseAgent):
+    """Generates structured reports from gathered evidence."""
 
     def __init__(self) -> None:
         super().__init__(
             AgentCard(
-                name="compliance_agent",
-                description="Applies compliance rules, redacts sensitive content, manages policy approvals.",
-                capabilities=["redact"],   # FIXED
-                rate_limit_per_minute=20,
+                name="synthesis_report_agent",
+                description="Creates structured research reports with inline citations and exports.",
+                capabilities=[
+                    "generate_sections",
+                    "produce_tables",
+                    "export_report",
+                ],
+                rate_limit_per_minute=6,
             )
         )
 
-    async def redact(self, text: str, require_approval: bool = False) -> Dict[str, Any]:
-        """
-        Redact sensitive information using MCP compliance tool.
-        """
-        redacted = await asyncio.to_thread(redact_pii, text)
+        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
-        return {
-            "redacted_text": redacted,
-            "approval_required": require_approval,
-        }
+        self.prompt = ChatPromptTemplate.from_template(
+            """
+You are the Synthesis & Report agent.
+Create a structured research report using ONLY the provided evidence.
+
+User Query: {query}
+Web Findings: {web_findings}
+Retrieved Evidence: {rag_context}
+
+Return STRICT JSON:
+{
+  "summary": "...",
+  "sections": [
+    {"title": "Section Title", "content": "Long content with citations [1]"}
+  ],
+  "tables": [
+    {"title": "Table Title", "rows": [["col1","col2"],["v1","v2"]]}
+  ],
+  "citations": [
+    {"id": 1, "source": "Title", "url": "...", "quote": "..."}
+  ]
+}
+"""
+        )
+
+        self.generator = ReportGenerator()
+
+    async def generate_report(self, query: str, evidence: Dict[str, Any]) -> Dict[str, Any]:
+        """Generates structured JSON report using LLM."""
+        chain = self.prompt | self.llm
+
+        response = await chain.ainvoke(
+            {
+                "query": query,
+                "web_findings": evidence.get("web_results", ""),
+                "rag_context": evidence.get("context", ""),
+            }
+        )
+
+        raw = response.content.strip()
+
+        # Handle triple-backtick code formatting
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+
+        # Parse JSON safely
+        try:
+            parsed = json.loads(raw)
+        except Exception as e:
+            parsed = {
+                "summary": raw,
+                "sections": [],
+                "tables": [],
+                "citations": [],
+                "error": f"JSON parsing failed: {str(e)}"
+            }
+
+        return parsed
+
+    async def export(self, final_answer: str, job_id: int | None = None) -> Dict[str, str]:
+        """Exports DOCX and PDF versions of the final report."""
+        filename = f"report_{job_id}" if job_id else "report_preview"
+
+        docx_path = await asyncio.to_
