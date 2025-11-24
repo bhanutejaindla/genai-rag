@@ -1,48 +1,77 @@
 from __future__ import annotations
 
-from typing import List, Dict, Any
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langchain_openai import ChatOpenAI
+from typing import Dict, Any
+from langchain_core.messages import HumanMessage, AIMessage
 
-from .base import BaseAgent, AgentCard
+from .ingestion_agent import IngestionRetrievalAgent
+from .web_research_agent import WebResearchAgent
+from .synthesis_agent import SynthesisReportAgent
+from .citation_agent import CitationAgent
+from .compliance_agent import ComplianceAgent
+from .chat_agent import ChatAgent
 
 
-class ChatAgent(BaseAgent):
-    """Maintains chat history and provides conversational summaries."""
+class OrchestratorAgent:
+    """Plans and routes work across specialist agents using LangGraph or direct calls."""
 
-    def __init__(self) -> None:
-        super().__init__(
-            AgentCard(
-                name="chat_agent",
-                description="Maintains conversation history and summarizes threads.",
-                capabilities=["store_history", "summarize_thread", "chat_memory"],
-            )
+    def __init__(self, graph_runner=None) -> None:
+        self.ingestion_agent = IngestionRetrievalAgent()
+        self.web_agent = WebResearchAgent()
+        self.synthesis_agent = SynthesisReportAgent()
+        self.citation_agent = CitationAgent()
+        self.compliance_agent = ComplianceAgent()
+        self.chat_agent = ChatAgent()
+        self.graph = graph_runner   # Optional
+
+    # ------------------------------------------------------------------
+    # 1) MAIN RESEARCH FLOW (if LangGraph enabled)
+    # ------------------------------------------------------------------
+    async def run_research_flow(self, query: str, job_id: int | None = None) -> Dict[str, Any]:
+        """Execute the graph-based multi-agent research flow."""
+        if not self.graph:
+            raise RuntimeError("Graph runner not provided.")
+
+        initial_state = {
+            "messages": [HumanMessage(content=query)],
+            "next_step": "start",
+            "artifacts": {},
+            "research_data": {},
+            "final_report": {},
+            "job_id": job_id,
+        }
+
+        final_state = await self.graph.ainvoke(
+            initial_state,
+            config={"configurable": {"thread_id": str(job_id) if job_id else "adhoc"}},
         )
-        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        self.history: Dict[str, List[BaseMessage]] = {}
 
-    # ---------------------------------------------------------------
-    # 1) Add message to conversation history
-    # ---------------------------------------------------------------
-    def append_message(self, thread_id: str, message: BaseMessage) -> None:
-        self.history.setdefault(thread_id, []).append(message)
+        final_answer = final_state["artifacts"].get("final_answer", "No answer generated.")
+        report_paths = final_state.get("final_report", {})
 
-    # ---------------------------------------------------------------
-    # 2) Retrieve full chat history for a thread
-    # ---------------------------------------------------------------
-    def get_history(self, thread_id: str) -> List[BaseMessage]:
-        return self.history.get(thread_id, [])
+        return {"answer": final_answer, "reports": report_paths}
 
-    # ---------------------------------------------------------------
-    # 3) Summarize the conversation
-    # ---------------------------------------------------------------
-    async def summarize(self, thread_id: str) -> str:
-        history = self.get_history(thread_id)
-        if not history:
-            return "No conversation yet."
+    # ------------------------------------------------------------------
+    # 2) SIMPLE DIRECT CALL – Ingestion
+    # ------------------------------------------------------------------
+    async def ingest_and_retrieve(self, content: str, source: str, job_id: int | None = None):
+        return await self.ingestion_agent.ingest_text(content, source, job_id)
 
-        # Use the last 6 messages for short-memory summarization
-        recent_history = history[-6:]
+    async def retrieve_context(self, query: str):
+        return await self.ingestion_agent.retrieve(query)
 
-        response = await self.llm.ainvoke(recent_history)
-        return response.content
+    # ------------------------------------------------------------------
+    # 3) CHAT HANDLER FOR FRONTEND
+    # ------------------------------------------------------------------
+    async def handle_chat(self, thread_id: str, message: str):
+        """Handle chat flow with saved conversation memory."""
+        human_msg = HumanMessage(content=message)
+        self.chat_agent.append_message(thread_id, human_msg)
+
+        # Summarize conversation
+        summary = await self.chat_agent.summarize(thread_id)
+
+        # Store system/AI summarization back into history
+        ai_msg = AIMessage(content=summary)
+        self.chat_agent.append_message(thread_id, ai_msg)
+
+        return {"summary": summary, "conversation": self.chat_agent.get_history(thread_id)}
