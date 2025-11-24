@@ -641,3 +641,123 @@ export class AdminPanelComponent implements OnInit {
 }
 
 
+
+import logging
+import sys
+import structlog
+
+def configure_logging():
+    """
+    Configures structured logging for the application.
+    """
+
+    shared_processors = [
+        structlog.contextvars.merge_contextvars,  # include contextvars
+        structlog.processors.add_log_level,       # log_level=info/debug
+        structlog.processors.TimeStamper(fmt="iso"),  # timestamp
+    ]
+
+    if sys.stderr.isatty():
+        # Pretty color logs for local development
+        processors = shared_processors + [
+            structlog.dev.ConsoleRenderer(),
+        ]
+    else:
+        # JSON logs for production / observability dashboards
+        processors = shared_processors + [
+            structlog.processors.dict_tracebacks,
+            structlog.processors.JSONRenderer(),
+        ]
+
+    structlog.configure(
+        processors=processors,
+        logger_factory=structlog.PrintLoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
+    # Standard library logging → structlog compatibility
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=logging.INFO,
+    )
+
+logger = structlog.get_logger()
+
+
+from langfuse import Langfuse
+from langfuse.client import LangfuseClient
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+import os
+
+# Pull credentials from environment
+LANGFUSE_SECRET = os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_PUBLIC = os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+
+# Initialize global client
+langfuse = Langfuse(
+    secret_key=LANGFUSE_SECRET,
+    public_key=LANGFUSE_PUBLIC,
+    host=LANGFUSE_HOST,
+)
+
+client = LangfuseClient(
+    secret_key=LANGFUSE_SECRET,
+    public_key=LANGFUSE_PUBLIC,
+    host=LANGFUSE_HOST,
+)
+
+# -------- Middleware for HTTP calls --------
+
+class LangfuseMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        trace = langfuse.trace(
+            name=f"{request.method} {request.url.path}",
+            input={"query_params": dict(request.query_params)},
+        )
+
+        response = await call_next(request)
+
+        trace.end(
+            output={"status_code": response.status_code},
+        )
+
+        return response
+
+
+def setup_langfuse_middleware(app):
+    """Attach Langfuse middleware to FastAPI."""
+    app.add_middleware(LangfuseMiddleware)
+
+
+from .logging_config import configure_logging, logger
+from .langfuse_config import setup_langfuse_middleware
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    configure_logging()   # logging setup
+    setup_langfuse_middleware(app)  # Langfuse tracing
+    create_db_and_tables()
+    yield
+
+from langfuse_config import langfuse
+
+async def run_agent(query: str):
+    trace = langfuse.trace(name="agent.run", input={"query": query})
+
+    step1 = trace.span("RAG")
+    context = await asyncio.to_thread(query_documents, query)
+    step1.end()
+    
+    step2 = trace.span("Web Search")
+    web_results = await asyncio.to_thread(web_search, query)
+    step2.end()
+
+    # ... other steps ...
+
+    trace.end(output={"answer": final_answer})
+
+    return {"answer": final_answer}
+
